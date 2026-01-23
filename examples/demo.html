@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monitor SDK Demo</title>
+  </head>
+  <body>
+    <h1>Monitor SDK Demo</h1>
+    <button id="errorBtn">Trigger Error</button>
+    <button id="promiseBtn">Trigger Promise Error</button>
+    <img src="invalid.jpg" alt="Test resource error" />
+
+    <script type="module">
+      import Monitor from '../packages/sdk/dist/index.esm.js';
+
+      const monitor = new Monitor({
+        projectId: 'demo-project',
+        reportUrl: 'http://localhost:3333',
+        maxErrors: 5,
+        sampleRate: 1,
+      });
+
+      document.getElementById('errorBtn').addEventListener('click', () => {
+        throw new Error('Test error from button click');
+      });
+
+      document.getElementById('promiseBtn').addEventListener('click', () => {
+        Promise.reject(new Error('Test promise rejection'));
+      });
+
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          monitor.report();
+        }, 3000);
+      });
+    </script>
+  </body>
+</html>

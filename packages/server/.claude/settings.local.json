@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm init:*)",
+      "Bash(pnpm run dev)",
+      "Bash(mongod:*)",
+      "Bash(docker --version:*)",
+      "Bash(choco:*)",
+      "Bash(scoop:*)",
+      "Bash(npm run build:*)"
+    ]
+  }
+}
