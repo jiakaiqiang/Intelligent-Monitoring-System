@@ -10,16 +10,17 @@ export class ReportService {
   constructor(private aiService: AiService) {}
 
   async create(reportData: any) {
+    console.log('jkq',reportData)
     // const report = new this.reportModel(reportData);
     // await report.save();
 
-    if (reportData.errorLogs?.length > 0) {
+    if (reportData.errors?.length > 0) {
       // await this.queueService.push('error-analysis', {
       //   reportId: report._id,
       //   errors: reportData.errorLogs,
       // });
-
-      const analysis = await this.aiService.analyzeError(reportData.errorLogs);
+     console.log(reportData.errors,'reportData.errorLogs')
+      const analysis = await this.aiService.analyzeError(reportData.errors);
       return { ...reportData, aiAnalysis: analysis };
     }
 

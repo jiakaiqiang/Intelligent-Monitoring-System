@@ -27,7 +27,7 @@ export class Monitor {
     this.config = {
       maxErrors: 10,
       sampleRate: 1,
-      enableCompression: true,
+      enableCompression: false,
       enableRetry: true,
       ...config
     };
@@ -120,17 +120,17 @@ export class Monitor {
       performance: this.performanceMetrics,
       actions: this.actionQueue.length > 0 ? this.actionQueue : undefined,
     };
-
-    const url = `${this.config.reportUrl}${API_ENDPOINTS.REPORT}`;
+   console.log(data,'data')
+    const url = `${this.config.reportUrl}/api/jkq`;
     const payload = this.config.enableCompression ? compress(data) : JSON.stringify(data);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
 
-    if (this.config.enableCompression) {
-      headers['Content-Encoding'] = 'base64';
-    }
-
+    // if (this.config.enableCompression) {
+    //   headers['Content-Encoding'] = 'base64';
+    // }
+   console.log(url,'urlurlurlurlurlurlurlurlurlurl',payload)
     const sendReport = async () => {
       const response = await fetch(url, {
         method: 'POST',

@@ -7,16 +7,21 @@ import Anthropic from '@anthropic-ai/sdk';
 export class AiService implements OnModuleInit {
   private anthropic: Anthropic;
 
-  constructor() {}
+  constructor() {
+    this.onModuleInit()
+  }
 
   onModuleInit() {
-    if (process.env.ANTHROPIC_API_KEY) {
-      this.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      // this.startWorker();
-    }
+    // if (process.env.ANTHROPIC_API_KEY) {
+     
+    //   // this.startWorker();
+    // }
+     this.anthropic = new Anthropic({ apiKey:'sk-eY27WVQJy3Ysf3MVtbdt78DVVWp3lVF5rkicPARi375AOaWi',baseURL:"https://runanytime.hxi.me/v1/chat/completions" });
+     console.log(this.anthropic,'909090909')
   }
 
   async analyzeError(errors: any[]) {
+    console.log(errors,'wefwfwef')
     if (!this.anthropic) return null;
 
     const prompt = `分析以下前端错误并提供解决方案：\n${JSON.stringify(errors, null, 2)}`;

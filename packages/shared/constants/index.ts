@@ -12,3 +12,6 @@ export const ACTION_TYPES = {
 export const API_ENDPOINTS = {
   REPORT: '/api/report'
 } as const;
+export const Jkq = {
+  JKQ: '/api/jkq'
+} as const;

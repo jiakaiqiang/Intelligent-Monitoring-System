@@ -5,9 +5,20 @@ import { ReportService } from './report.service';
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
-  @Post('report')
+  @Get('report')
   async createReport(@Body() reportData: any) {
-    return this.reportService.create(reportData);
+    console.log(reportData,'reportData')
+    return reportData
+    //return this.reportService.create(reportData);
+  }
+  @Get('test')
+  async test() {
+    return { message: 'test' };
+  }
+  @Post('jkq')
+  createJkq(@Body() jkqData: any) {
+    console.log(jkqData,'jkqData',this.reportService)
+  return this.reportService.create(jkqData);
   }
 
   @Get('reports/:projectId')
