@@ -32,8 +32,8 @@ export class Report extends Document {
     timestamp: number;
   }>;
 
-  @Prop()
-  aiAnalysis?: string;
+  // @Prop()
+  // aiAnalysis?: string;
 }
 
 export const ReportSchema = SchemaFactory.createForClass(Report);

@@ -83,6 +83,9 @@ importers:
       '@monitor/shared':
         specifier: workspace:*
         version: link:../shared
+      source-map:
+        specifier: ^0.7.4
+        version: 0.7.4
     devDependencies:
       '@rollup/plugin-node-resolve':
         specifier: ^16.0.3
@@ -132,6 +135,9 @@ importers:
       rxjs:
         specifier: ^7.8.1
         version: 7.8.2
+      source-map:
+        specifier: ^0.7.4
+        version: 0.7.4
     devDependencies:
       '@nestjs/cli':
         specifier: ^10.0.0

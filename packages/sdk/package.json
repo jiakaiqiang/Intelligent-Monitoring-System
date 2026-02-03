@@ -10,7 +10,8 @@
     "lint": "eslint . --ext .ts"
   },
   "dependencies": {
-    "@monitor/shared": "workspace:*"
+    "@monitor/shared": "workspace:*",
+    "source-map": "^0.7.4"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.3",

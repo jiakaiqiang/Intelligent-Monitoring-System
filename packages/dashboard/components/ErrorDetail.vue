@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import type { ErrorInfo } from '@monitor/shared/types';
 
+interface MappedErrorInfo extends ErrorInfo {
+  mappedStack?: string;
+  sourceFile?: string;
+  sourceLine?: number;
+  sourceColumn?: number;
+}
+
 interface Props {
-  error: ErrorInfo;
+  error: ErrorInfo | MappedErrorInfo;
   aiAnalysis?: string;
 }
 
@@ -18,11 +25,99 @@ defineProps<Props>();
       <p><strong>Message:</strong> {{ error.message }}</p>
       <p><strong>Time:</strong> {{ new Date(error.timestamp).toLocaleString() }}</p>
       <p><strong>URL:</strong> {{ error.url }}</p>
+
+      <!-- 版本信息 -->
+      <p v-if="error.version" :style="{ marginTop: '10px' }">
+        <strong>Version:</strong>
+        <span :style="{ background: '#f0f0f0', padding: '2px 6px', borderRadius: '3px' }">
+          {{ error.version }}
+        </span>
+      </p>
     </div>
 
-    <div v-if="error.stack" :style="{ marginBottom: '20px' }">
+    <!-- 映射后的源码位置 -->
+    <div v-if="error.sourceFile" :style="{ marginBottom: '20px' }">
+      <h3>Source Location</h3>
+      <div :style="{
+        background: '#e6f7ff',
+        padding: '15px',
+        borderRadius: '4px',
+        marginBottom: '10px'
+      }">
+        <div :style="{ display: 'flex', alignItems: 'center', gap: '10px' }">
+          <div>
+            <strong>File:</strong> {{ error.sourceFile }}
+          </div>
+          <div v-if="error.sourceLine">
+            <strong>Line:</strong>
+            <span :style="{ background: '#fff', padding: '2px 6px', borderRadius: '3px' }">
+              {{ error.sourceLine }}
+            </span>
+          </div>
+          <div v-if="error.sourceColumn">
+            <strong>Column:</strong>
+            <span :style="{ background: '#fff', padding: '2px 6px', borderRadius: '3px' }">
+              {{ error.sourceColumn }}
+            </span>
+          </div>
+        </div>
+
+        <!-- 跳转到源码按钮 -->
+        <button
+          @click="jumpToSource(error.sourceFile, error.sourceLine, error.sourceColumn)"
+          :style="{
+            marginTop: '10px',
+            padding: '6px 12px',
+            background: '#1890ff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '14px'
+          }"
+        >
+          View Source Code
+        </button>
+      </div>
+    </div>
+
+    <!-- 堆栈对比显示 -->
+    <div v-if="error.mappedStack" :style="{ marginBottom: '20px' }">
       <h3>Stack Trace</h3>
-      <pre :style="{ background: '#f5f5f5', padding: '10px', overflow: 'auto' }">{{ error.stack }}</pre>
+
+      <!-- 切换标签 -->
+      <div :style="{ marginBottom: '10px' }">
+        <button
+          v-for="tab in ['original', 'mapped']"
+          :key="tab"
+          @click="currentStack = tab"
+          :style="{
+            marginRight: '10px',
+            padding: '6px 12px',
+            background: currentStack === tab ? '#1890ff' : '#f0f0f0',
+            color: currentStack === tab ? 'white' : 'black',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }"
+        >
+          {{ tab === 'original' ? 'Original' : 'Mapped' }}
+        </button>
+      </div>
+
+      <!-- 堆栈内容 -->
+      <div :style="{
+        background: '#f5f5f5',
+        padding: '10px',
+        overflow: 'auto',
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        lineHeight: '1.6',
+        borderRadius: '4px'
+      }">
+        <div v-if="currentStack === 'original'">{{ error.stack }}</div>
+        <div v-else>{{ error.mappedStack }}</div>
+      </div>
     </div>
 
     <div
@@ -39,3 +134,23 @@ defineProps<Props>();
     </div>
   </div>
 </template>
+
+<script>
+// 堆栈显示状态
+let currentStack = 'original';
+
+// 暴露给模板
+defineExpose({
+  currentStack,
+  jumpToSource
+});
+
+// 跳转到源码
+function jumpToSource(file, line, column) {
+  if (typeof window !== 'undefined') {
+    // 在新窗口打开源码
+    const sourceUrl = `${file}?line=${line}&column=${column}`;
+    window.open(sourceUrl, '_blank');
+  }
+}
+</script>

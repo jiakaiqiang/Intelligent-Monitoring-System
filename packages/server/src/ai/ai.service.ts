@@ -1,11 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
+
 // import { QueueService } from '../queue/queue.service';
 // import { ReportService } from '../report/report.service';
+import { modelAnalysis } from './alModel';
 
 @Injectable()
 export class AiService implements OnModuleInit {
-  private anthropic: Anthropic;
+
 
   constructor() {
     this.onModuleInit()
@@ -16,23 +17,16 @@ export class AiService implements OnModuleInit {
      
     //   // this.startWorker();
     // }
-     this.anthropic = new Anthropic({ apiKey:'sk-eY27WVQJy3Ysf3MVtbdt78DVVWp3lVF5rkicPARi375AOaWi',baseURL:"https://runanytime.hxi.me/v1/chat/completions" });
-     console.log(this.anthropic,'909090909')
+     
   }
 
   async analyzeError(errors: any[]) {
-    console.log(errors,'wefwfwef')
-    if (!this.anthropic) return null;
-
+   
     const prompt = `分析以下前端错误并提供解决方案：\n${JSON.stringify(errors, null, 2)}`;
 
-    const message = await this.anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const message = await modelAnalysis(prompt);
 
-    return message.content[0].type === 'text' ? message.content[0].text : null;
+    return message
   }
 
   // private async startWorker() {
