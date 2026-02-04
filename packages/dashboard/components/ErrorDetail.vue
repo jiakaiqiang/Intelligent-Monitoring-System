@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { ErrorInfo } from '@monitor/shared/types';
 
 interface MappedErrorInfo extends ErrorInfo {
@@ -13,7 +14,25 @@ interface Props {
   aiAnalysis?: string;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
+
+// 堆栈显示状态
+const currentStack = ref('original');
+
+// 暴露给模板
+defineExpose({
+  currentStack,
+  jumpToSource
+});
+
+// 跳转到源码 - 发出事件而不是直接跳转
+function jumpToSource(file: string, line?: number, column?: number) {
+  // 触发事件让父组件处理
+  const event = new CustomEvent('view-source', {
+    detail: { file, line, column }
+  });
+  document.dispatchEvent(event);
+}
 </script>
 
 <template>
@@ -33,6 +52,29 @@ defineProps<Props>();
           {{ error.version }}
         </span>
       </p>
+    </div>
+
+    <!-- 映射状态指示器 -->
+    <div v-if="error.sourceFile" :style="{ marginBottom: '10px' }">
+      <span :style="{
+        background: '#f6ffed',
+        color: '#52c41a',
+        padding: '2px 8px',
+        borderRadius: '3px',
+        fontSize: '12px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px'
+      }">
+        <span>✓</span> Mapped to source
+      </span>
+    </div>
+
+    <div
+      v-else
+      :style="{ marginBottom: '20px', padding: '10px', background: '#fff7e6', borderRadius: '4px', fontSize: '14px', color: '#d46b08' }"
+    >
+      <p :style="{ margin: 0 }">No source mapping available for this error.</p>
     </div>
 
     <!-- 映射后的源码位置 -->
@@ -64,7 +106,7 @@ defineProps<Props>();
 
         <!-- 跳转到源码按钮 -->
         <button
-          @click="jumpToSource(error.sourceFile, error.sourceLine, error.sourceColumn)"
+          @click="$emit('view-source', error)"
           :style="{
             marginTop: '10px',
             padding: '6px 12px',
@@ -141,16 +183,6 @@ let currentStack = 'original';
 
 // 暴露给模板
 defineExpose({
-  currentStack,
-  jumpToSource
+  currentStack
 });
-
-// 跳转到源码
-function jumpToSource(file, line, column) {
-  if (typeof window !== 'undefined') {
-    // 在新窗口打开源码
-    const sourceUrl = `${file}?line=${line}&column=${column}`;
-    window.open(sourceUrl, '_blank');
-  }
-}
 </script>

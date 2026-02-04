@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, CACHE_MANAGER, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { SourceMapEntity, SourceMapDocument } from '../schemas/sourcemap.schema';
 import { SourceMapInfo } from '../schemas/sourcemap.schema';
 import * as sourceMap from 'source-map';
+import { ProjectVersionQueryDto } from './dto/sourcemap.dto';
+import { Cache } from 'cache-manager';
 
 export interface SourceMapQuery {
   projectId: string;
@@ -16,6 +18,7 @@ export class SourceMapService {
   constructor(
     @InjectModel(SourceMapEntity.name)
     private readonly sourceMapModel: Model<SourceMapDocument>,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
   /**
@@ -59,42 +62,298 @@ export class SourceMapService {
   }
 
   /**
-   * 查询 SourceMap
+   * Query SourceMap with optimized caching and pagination
+   */
+  async find(query: SourceMapQuery, page?: number, limit?: number): Promise<{
+    data: SourceMapDocument[];
+    total: number;
+    totalPages: number;
+  }> {
+    const { projectId, version, filename } = query;
+
+    // Generate cache key
+    const cacheKey = `sourcemap:find:${projectId}:${version || 'latest'}:${filename || 'all'}:${page}:${limit}`;
+
+    // Check cache first
+    const cachedResult = await this.cacheManager.get(cacheKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
+
+    const filter: any = { projectId };
+    if (version) filter.version = version;
+    if (filename) filter.filename = filename;
+
+    const skip = (page - 1) * limit;
+    const total = await this.sourceMapModel.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    const data = await this.sourceMapModel
+      .find(filter)
+      .sort({ uploadedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean({ leanWithId: true }) // Use lean queries for better performance
+      .exec();
+
+    const result = {
+      data,
+      total,
+      totalPages,
+    };
+
+    // Cache result for 5 minutes
+    await this.cacheManager.set(cacheKey, result, 300 * 1000);
+
+    return result;
+  }
+
+  /**
+   * Single SourceMap lookup with optimized query
    */
   async findOne(query: SourceMapQuery): Promise<SourceMapDocument | null> {
     const { projectId, version, filename } = query;
 
+    // Generate cache key
+    const cacheKey = `sourcemap:findOne:${projectId}:${version || 'latest'}:${filename}`;
+
+    // Check cache first
+    const cachedResult = await this.cacheManager.get(cacheKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
+
     const filter: any = { projectId };
     if (version) filter.version = version;
     if (filename) filter.filename = filename;
 
-    return this.sourceMapModel.findOne(filter).exec();
+    // Use projection to only fetch necessary fields for lookup
+    const result = this.sourceMapModel
+      .findOne(filter)
+      .select('_id filename version uploadedAt expiresAt content')
+      .lean({ leanWithId: true })
+      .exec();
+
+    // Cache result for 10 minutes
+    await this.cacheManager.set(cacheKey, result, 600 * 1000);
+
+    return result;
   }
 
   /**
-   * 批量查询 SourceMap
+   * Advanced search with optimized aggregation pipeline
    */
-  async find(query: SourceMapQuery): Promise<SourceMapDocument[]> {
-    const { projectId, version, filename } = query;
+  async advancedSearch(
+    filter: any,
+    page: number = 1,
+    limit: number = 10,
+    sortBy: string = 'uploadedAt',
+    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    includeContent: boolean = false
+  ): Promise<{
+    data: SourceMapDocument[];
+    total: number;
+    totalPages: number;
+    page: number;
+    limit: number;
+  }> {
+    // Generate cache key
+    const cacheKey = `sourcemap:advanced:${JSON.stringify(filter)}:${page}:${limit}:${sortBy}:${sortOrder}:${includeContent}`;
 
-    const filter: any = { projectId };
-    if (version) filter.version = version;
-    if (filename) filter.filename = filename;
+    // Check cache first
+    const cachedResult = await this.cacheManager.get(cacheKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
 
-    return this.sourceMapModel.find(filter).exec();
+    const skip = (page - 1) * limit;
+
+    // Use aggregation for better performance on complex queries
+    const totalPipeline = [
+      { $match: filter },
+      { $count: 'total' }
+    ];
+
+    const totalResult = await this.sourceMapModel.aggregate(totalPipeline).exec();
+    const total = totalResult[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const sort: any = {};
+    sort[sortBy] = sortOrder === 'ASC' ? 1 : -1;
+
+    const projection = includeContent
+      ? 'filename version uploadedAt expiresAt content'
+      : 'filename version uploadedAt expiresAt';
+
+    const data = await this.sourceMapModel
+      .find(filter)
+      .select(projection)
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .lean({ leanWithId: true })
+      .exec();
+
+    const result = {
+      data,
+      total,
+      totalPages,
+      page,
+      limit,
+    };
+
+    // Cache result for 1 minute since these are potentially dynamic searches
+    await this.cacheManager.set(cacheKey, result, 60 * 1000);
+
+    return result;
   }
 
   /**
-   * 获取项目指定版本的所有 SourceMap
+   * Get distinct versions for a project with caching
+   */
+  async getProjectVersions(projectId: string): Promise<string[]> {
+    // Generate cache key
+    const cacheKey = `sourcemap:versions:${projectId}`;
+
+    // Check cache first
+    const cachedResult = await this.cacheManager.get(cacheKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
+
+    const result = await this.sourceMapModel
+      .distinct('version', { projectId })
+      .lean()
+      .sort();
+
+    // Cache result for 10 minutes
+    await this.cacheManager.set(cacheKey, result, 600 * 1000);
+
+    return result;
+  }
+
+  /**
+   * Get health status with optimized queries
+   */
+  async getHealth(): Promise<{
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    timestamp: Date;
+    collectionInfo?: {
+      totalCount: number;
+      size: number;
+      newestEntry?: Date;
+      oldestEntry?: Date;
+    };
+  }> {
+    try {
+      const now = new Date();
+      const threshold = new Date(now.getTime() - 5 * 60 * 1000); // 5 minutes ago
+
+      // Execute parallel queries for better performance
+      const [
+        totalCount,
+        { totalSize },
+        newestEntry,
+        oldestEntry,
+        recentCount
+      ] = await Promise.all([
+        this.sourceMapModel.countDocuments({}).exec(),
+        this.sourceMapModel.aggregate([
+          { $group: { _id: null, totalSize: { $sum: { $strLenCP: '$content' } } } }
+        ]).exec(),
+        this.sourceMapModel.findOne().sort({ uploadedAt: -1 }).exec(),
+        this.sourceMapModel.findOne().sort({ uploadedAt: 1 }).exec(),
+        this.sourceMapModel.countDocuments({ uploadedAt: { $gte: threshold } }).exec()
+      ]);
+
+      const size = totalSize || 0;
+
+      let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+      if (recentCount === 0) {
+        status = 'unhealthy';
+      } else if (recentCount < 10) {
+        status = 'degraded';
+      }
+
+      return {
+        status,
+        timestamp: now,
+        collectionInfo: {
+          totalCount,
+          size,
+          newestEntry: newestEntry?.uploadedAt,
+          oldestEntry: oldestEntry?.uploadedAt,
+        },
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  /**
+   * 获取项目指定版本的所有 SourceMap (with pagination)
    */
   async findByProjectAndVersion(
     projectId: string,
-    version?: string
-  ): Promise<SourceMapDocument[]> {
+    version?: string,
+    page?: number,
+    limit?: number
+  ): Promise<{
+    data: SourceMapDocument[];
+    total: number;
+    totalPages: number;
+  }> {
     const filter: any = { projectId };
     if (version) filter.version = version;
 
-    return this.sourceMapModel.find(filter).exec();
+    const skip = (page - 1) * limit;
+    const total = await this.sourceMapModel.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    const data = await this.sourceMapModel
+      .find(filter)
+      .sort({ uploadedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    return {
+      data,
+      total,
+      totalPages,
+    };
+  }
+
+  /**
+   * Get SourceMap by project and version (single endpoint from task 8)
+   */
+  async getByProjectAndVersion(
+    projectId: string,
+    version: string
+  ): Promise<SourceMapDocument[]> {
+    // Generate cache key
+    const cacheKey = `sourcemap:getByProjectAndVersion:${projectId}:${version}`;
+
+    // Check cache first
+    const cachedResult = await this.cacheManager.get(cacheKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
+
+    const filter: any = { projectId, version };
+    const result = this.sourceMapModel
+      .find(filter)
+      .sort({ uploadedAt: -1 })
+      .lean({ leanWithId: true })
+      .exec();
+
+    // Cache result for 5 minutes
+    await this.cacheManager.set(cacheKey, result, 300 * 1000);
+
+    return result;
   }
 
   /**
@@ -142,15 +401,16 @@ export class SourceMapService {
     file: string,
     version?: string
   ): Promise<SourceMapDocument | null> {
-    const sourceMaps = await this.findByProjectAndVersion(projectId, version);
+    // Use the new paginated method
+    const result = await this.findByProjectAndVersion(projectId, version, 1, 100);
 
-    if (!sourceMaps || sourceMaps.length === 0) {
+    if (!result.data || result.data.length === 0) {
       return null;
     }
 
     // 1. 优先根据版本和文件名精确匹配
     if (version) {
-      const exactMatch = sourceMaps.find(sm =>
+      const exactMatch = result.data.find(sm =>
         sm.version === version &&
         (sm.filename === `${file}.map` || sm.filename.includes(file))
       );
@@ -158,7 +418,7 @@ export class SourceMapService {
     }
 
     // 2. 根据文件名匹配
-    const filenameMatch = sourceMaps.find(sm =>
+    const filenameMatch = result.data.find(sm =>
       sm.filename === `${file}.map` ||
       sm.filename.endsWith(file) ||
       sm.filename.includes(file)
@@ -166,7 +426,7 @@ export class SourceMapService {
     if (filenameMatch) return filenameMatch;
 
     // 3. 如果都没有匹配，返回第一个 SourceMap（最后的选择）
-    return sourceMaps[0] || null;
+    return result.data[0] || null;
   }
 
   /**
@@ -178,5 +438,70 @@ export class SourceMapService {
     } catch {
       return atob(base64);
     }
+  }
+
+  /**
+   * Batch delete SourceMaps
+   */
+  async bulkDelete(ids: string[]): Promise<number> {
+    const result = await this.sourceMapModel.deleteMany({
+      _id: { $in: ids }
+    });
+    return result.deletedCount || 0;
+  }
+
+  /**
+   * Get statistics for a project
+   */
+  async getProjectStats(projectId: string): Promise<{
+    totalFiles: number;
+    totalSize: number;
+    versions: string[];
+    expiredCount: number;
+    expiringSoonCount: number;
+  }> {
+    const pipeline = [
+      { $match: { projectId } },
+      {
+        $facet: {
+          count: [{ $count: 'total' }],
+          size: [{ $group: { _id: null, totalSize: { $sum: { $strLenCP: '$content' } } } }],
+          versions: [{ $group: { _id: '$version', count: { $sum: 1 } } }],
+          status: [
+            {
+              $group: {
+                _id: {
+                  $cond: {
+                    if: { $gte: ['$expiresAt', new Date()] },
+                    then: 'active',
+                    else: 'expired'
+                  }
+                },
+                count: { $sum: 1 }
+              }
+            }
+          ]
+        }
+      }
+    ];
+
+    const result = await this.sourceMapModel.aggregate(pipeline).exec();
+
+    const stats = result[0];
+    const total = stats.count[0]?.total || 0;
+    const totalSize = stats.size[0]?.totalSize || 0;
+    const versionMap = Object.fromEntries(stats.versions.map(v => [v._id, v.count]));
+    const versions = Object.keys(versionMap).sort();
+
+    const active = stats.status.find(s => s._id === 'active')?.count || 0;
+    const expired = stats.status.find(s => s._id === 'expired')?.count || 0;
+
+    return {
+      totalFiles: total,
+      totalSize,
+      versions,
+      expiredCount: expired,
+      expiringSoonCount: Math.min(total - active, 100) // Estimate
+    };
   }
 }

@@ -2,6 +2,7 @@
   "name": "intelligent-monitoring-system",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@10.28.1",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -25,6 +26,11 @@
     "pnpm": ">=8.0.0"
   },
   "dependencies": {
-    "axios": "^1.13.2"
+    "@nestjs/cache-manager": "^3.1.0",
+    "@nestjs/swagger": "^11.2.5",
+    "axios": "^1.13.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.3",
+    "swagger-ui-express": "^5.0.1"
   }
 }

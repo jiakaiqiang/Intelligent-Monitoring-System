@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SourceMap Performance Optimization Configuration",
+  "description": "Configuration options for SourceMap API performance optimizations",
+  "type": "object",
+  "properties": {
+    "caching": {
+      "type": "object",
+      "description": "Caching configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "defaultTTL": {
+          "type": "integer",
+          "default": 300,
+          "description": "Default cache TTL in seconds"
+        },
+        "maxItems": {
+          "type": "integer",
+          "default": 1000,
+          "description": "Maximum number of items in cache"
+        }
+      }
+    },
+    "compression": {
+      "type": "object",
+      "description": "Response compression configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "threshold": {
+          "type": "integer",
+          "default": 1024,
+          "description": "Minimum size in bytes to trigger compression"
+        }
+      }
+    },
+    "rateLimiting": {
+      "type": "object",
+      "description": "Rate limiting configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "windowMs": {
+          "type": "integer",
+          "default": 900000,
+          "description": "Time window in milliseconds (15 minutes default)"
+        },
+        "maxRequests": {
+          "type": "integer",
+          "default": 100,
+          "description": "Maximum requests per IP per window"
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "description": "Database optimization configuration",
+      "properties": {
+        "queryTimeout": {
+          "type": "integer",
+          "default": 30000,
+          "description": "Query timeout in milliseconds"
+        },
+        "maxConnections": {
+          "type": "integer",
+          "default": 50,
+          "description": "Maximum database connections"
+        },
+        "enableIndexHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable index hints for query optimization"
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "Performance logging configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "slowRequestThreshold": {
+          "type": "integer",
+          "default": 1000,
+          "description": "Threshold in milliseconds for slow request logging"
+        },
+        "queryLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log individual query execution times"
+        }
+      }
+    }
+  }
+}

@@ -6,15 +6,29 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
-    "start": "node dist/main"
+    "start": "node dist/main",
+    "test": "vitest",
+    "test:unit": "vitest --config vitest.config.ts",
+    "test:e2e": "vitest --config vitest.config.ts --testNamePattern=e2e",
+    "test:cov": "vitest --config vitest.config.ts --coverage",
+    "test:ui": "vitest --ui"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
+    "@nestjs/cache-manager": "^3.1.0",
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^3.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/mongoose": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/serve-static": "^5.0.4",
+    "@nestjs/swagger": "^11.2.5",
+    "@types/compression": "^1.8.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.3",
+    "compression": "^1.8.1",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
     "mongoose": "^8.0.0",
     "redis": "^4.6.0",
     "reflect-metadata": "^0.1.13",
@@ -24,6 +38,8 @@
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "@vitest/coverage-v8": "^4.0.18",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
   }
 }

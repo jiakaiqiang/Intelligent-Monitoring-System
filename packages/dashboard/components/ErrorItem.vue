@@ -36,6 +36,22 @@
       </h4>
     </div>
 
+    <!-- 映射状态显示 -->
+    <div v-if="error.sourceFile" :style="{ marginBottom: '8px' }">
+      <span :style="{
+        background: '#f6ffed',
+        color: '#52c41a',
+        padding: '2px 6px',
+        borderRadius: '3px',
+        fontSize: '11px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '3px'
+      }">
+        <span>✓</span> Mapped
+      </span>
+    </div>
+
     <!-- 映射后的源码位置 -->
     <div v-if="error.sourceFile" :style="{ marginBottom: '8px' }">
       <div :style="{
@@ -45,12 +61,61 @@
         padding: '4px 8px',
         borderRadius: '4px',
         fontSize: '12px',
-        color: '#0050b3'
-      }">
+        color: '#0050b3',
+        cursor: 'pointer'
+      }" @click="$emit('view-source', error)">
         <span :style="{ marginRight: '8px' }">📍 {{ error.sourceFile }}</span>
         <span v-if="error.sourceLine">:{{ error.sourceLine }}</span>
         <span v-if="error.sourceColumn">:{{ error.sourceColumn }}</span>
+        <span :style="{ marginLeft: '8px', color: '#1890ff' }">→</span>
       </div>
+    </div>
+
+    <!-- 未映射提示和映射按钮 -->
+    <div v-else-if="!error.sourceFile" :style="{ marginBottom: '8px' }">
+      <div :style="{
+        display: 'inline-flex',
+        alignItems: 'center',
+        background: '#fff7e6',
+        padding: '2px 6px',
+        borderRadius: '3px',
+        fontSize: '11px',
+        color: '#d46b08'
+      }">
+        <span :style="{ marginRight: '5px' }">⚠️</span>
+        <span>Source mapping not available</span>
+      </div>
+      <button
+        v-if="!mappingInProgress"
+        @click="$emit('map-error', error)"
+        :style="{
+          marginLeft: '10px',
+          padding: '4px 8px',
+          background: '#52c41a',
+          color: 'white',
+          border: 'none',
+          borderRadius: '3px',
+          fontSize: '11px',
+          cursor: 'pointer'
+        }"
+      >
+        Map to Source
+      </button>
+      <button
+        v-else
+        :style="{
+          marginLeft: '10px',
+          padding: '4px 8px',
+          background: '#d9d9d9',
+          color: '999',
+          border: 'none',
+          borderRadius: '3px',
+          fontSize: '11px',
+          cursor: 'not-allowed'
+        }"
+      >
+        Mapping...
+      </button>
     </div>
 
     <!-- 堆栈预览 -->
@@ -67,32 +132,61 @@
     </div>
 
     <!-- 展开/收起按钮 -->
-    <button
-      v-if="error.stack"
-      @click="expanded = !expanded"
-      :style="{
-        marginTop: '8px',
-        padding: '4px 8px',
-        background: 'transparent',
-        border: 'none',
-        color: '#1890ff',
-        cursor: 'pointer',
-        fontSize: '12px'
-      }"
-    >
-      {{ expanded ? 'Collapse' : 'Expand' }}
-    </button>
+    <div v-if="error.stack && !expanded" :style="{ marginTop: '8px' }">
+      <button
+        @click="expanded = true"
+        :style="{
+          padding: '4px 8px',
+          background: 'transparent',
+          border: 'none',
+          color: '#1890ff',
+          cursor: 'pointer',
+          fontSize: '12px'
+        }"
+      >
+        Show Stack Trace
+      </button>
+    </div>
 
     <!-- 子错误列表 -->
-    <div v-if="expanded && subErrors.length > 0" :style="{ marginTop: '12px', marginLeft: '20px' }">
+    <div v-if="expanded" :style="{ marginTop: '12px', marginLeft: '20px' }">
       <div v-for="subError in subErrors" :key="subError.id" :style="{ marginBottom: '8px' }">
-        <ErrorItem :error="subError" @click="$emit('select-error', subError)" />
+        <ErrorItem
+          :error="subError"
+          @select-error="$emit('select-error', subError)"
+          @map-error="$emit('map-error', subError)"
+          @view-source="$emit('view-source', subError)"
+        />
       </div>
+    </div>
+  </div>
+</template>
+          alignItems: 'center',
+          gap: '5px'
+        }"
+      >
+        <span>👁️ View Source</span>
+      </button>
+
+      <button
+        @click="expanded = !expanded"
+        :style="{
+          padding: '4px 8px',
+          background: 'transparent',
+          border: 'none',
+          color: '#666',
+          cursor: 'pointer',
+          fontSize: '12px'
+        }"
+      >
+        {{ expanded ? 'Hide Stack' : 'Show Stack' }}
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { ErrorInfo } from '@monitor/shared/types';
 
 interface Props {
@@ -100,8 +194,7 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const expanded = ref(false);
-const emit = defineEmits(['select-error']);
+const emit = defineEmits(['select-error', 'map-error', 'view-source']);
 
 // 获取堆栈的第一行
 const getFirstStackLine = (stack: string) => {
@@ -123,12 +216,8 @@ const handleClick = () => {
   emit('select-error', props.error);
 };
 
-// 点击事件监听
-if (typeof window !== 'undefined') {
-  const errorElement = document.currentScript?.parentElement;
-  if (errorElement) {
-    errorElement.style.cursor = 'pointer';
-    errorElement.onclick = handleClick;
-  }
-}
+// 提供方法给模板
+defineExpose({
+  getFirstStackLine
+});
 </script>
