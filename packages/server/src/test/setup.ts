@@ -1,13 +1,15 @@
 // Test setup file
-import { vi } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // Mock global objects
-global.describe = describe;
-global.it = it;
-global.expect = expect;
-global.beforeEach = beforeEach;
-global.afterEach = afterEach;
-global.vi = vi;
+const globalAny = globalThis as Record<string, unknown>;
+
+globalAny.describe = describe;
+globalAny.it = it;
+globalAny.expect = expect;
+globalAny.beforeEach = beforeEach;
+globalAny.afterEach = afterEach;
+globalAny.vi = vi;
 
 // Mock console methods in test environment
 if (process.env.NODE_ENV === 'test') {

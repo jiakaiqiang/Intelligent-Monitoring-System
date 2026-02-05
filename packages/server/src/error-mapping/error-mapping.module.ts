@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ErrorMappingService } from './error-mapping.service';
-import { SourceMapService } from '../sourcemap/sourcemap.service';
-import { ReportService } from '../report/report.service';
+import { SourceMapModule } from '../sourcemap/sourcemap.module';
+import { ReportModule } from '../report/report.module';
 
 @Module({
-  providers: [ErrorMappingService, SourceMapService, ReportService],
-  exports: [ErrorMappingService]
+  imports: [SourceMapModule, ReportModule],
+  providers: [ErrorMappingService],
+  exports: [ErrorMappingService],
 })
 export class ErrorMappingModule {}

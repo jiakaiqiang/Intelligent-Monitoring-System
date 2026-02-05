@@ -1,10 +1,10 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
-import * as rateLimit from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 
 @Injectable()
 export class RateLimiterMiddleware implements NestMiddleware {
-  private readonly limiter: rateLimit.RequestHandler;
+  private readonly limiter: ReturnType<typeof rateLimit>;
 
   constructor() {
     this.limiter = rateLimit({
@@ -18,9 +18,6 @@ export class RateLimiterMiddleware implements NestMiddleware {
       standardHeaders: true,
       legacyHeaders: false,
       skipFailedRequests: true,
-      handler: (req: Request, res: Response, options: ratelimiter.Options) => {
-        res.status(options.statusCode || 429).json(options.message);
-      }
     });
   }
 

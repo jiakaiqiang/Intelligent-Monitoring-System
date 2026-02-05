@@ -12,7 +12,7 @@ const mockSourceMapService = {
   advancedSearch: jest.fn(),
   getProjectVersions: jest.fn(),
   bulkOperations: jest.fn(),
-  getHealth: jest.fn()
+  getHealth: jest.fn(),
 };
 
 describe('SourceMapController', () => {
@@ -25,9 +25,9 @@ describe('SourceMapController', () => {
       providers: [
         {
           provide: SourceMapService,
-          useValue: mockSourceMapService
-        }
-      ]
+          useValue: mockSourceMapService,
+        },
+      ],
     }).compile();
 
     controller = module.get<SourceMapController>(SourceMapController);
@@ -41,13 +41,10 @@ describe('SourceMapController', () => {
   describe('upload', () => {
     it('should upload source maps successfully', async () => {
       const createDto = {
-        projectId: 'test-project',
-        sourceMaps: [
-          {
-            filename: 'app.js.map',
-            content: 'test-content'
-          }
-        ]
+        project: 'test-project',
+        version: '1.0.0',
+        filename: 'app.js.map',
+        sourcemap: 'test-content',
       };
 
       const mockDocuments = [
@@ -55,26 +52,31 @@ describe('SourceMapController', () => {
           id: '123',
           filename: 'app.js.map',
           version: '1.0.0',
-          uploadedAt: new Date()
-        }
+          uploadedAt: new Date(),
+        },
       ];
 
       mockSourceMapService.create.mockResolvedValue(mockDocuments);
 
-      const result = await controller.upload(createDto);
+      const result = await controller.upload(createDto as any);
 
       expect(result.success).toBe(true);
-      expect(result.data).toHaveLength(1);
-      expect(service.create).toHaveBeenCalledWith('test-project', createDto.sourceMaps);
+      expect(result.data.filename).toBe('app.js.map');
+      expect(service.create).toHaveBeenCalledWith('test-project', [
+        {
+          filename: 'app.js.map',
+          content: 'test-content',
+          version: '1.0.0',
+        },
+      ]);
     });
 
     it('should throw error for invalid request', async () => {
-      const invalidDto = {
-        projectId: '',
-        sourceMaps: []
-      };
+      mockSourceMapService.create.mockRejectedValue(new BadRequestException('Failed'));
 
-      await expect(controller.upload(invalidDto as any)).rejects.toThrow(BadRequestException);
+      await expect(
+        controller.upload({ project: 'p', version: '1', filename: 'f', sourcemap: '' } as any)
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -87,36 +89,31 @@ describe('SourceMapController', () => {
             filename: 'app.js.map',
             version: '1.0.0',
             uploadedAt: new Date(),
-            expiresAt: new Date()
-          }
+            expiresAt: new Date(),
+          },
         ],
         total: 1,
-        totalPages: 1
+        totalPages: 1,
       };
 
       mockSourceMapService.findByProjectAndVersion.mockResolvedValue(mockResult);
 
-      const result = await controller.getByProject('test-project', { version: '1.0.0' });
+      const result = await controller.getByProject('test-project', { version: '1.0.0' } as any);
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveLength(1);
-      expect(service.findByProjectAndVersion).toHaveBeenCalledWith(
-        'test-project',
-        '1.0.0',
-        1,
-        10
-      );
+      expect(service.findByProjectAndVersion).toHaveBeenCalledWith('test-project', '1.0.0', 1, 10);
     });
 
     it('should throw error when no source maps found', async () => {
       mockSourceMapService.findByProjectAndVersion.mockResolvedValue({
         data: [],
         total: 0,
-        totalPages: 0
+        totalPages: 0,
       });
 
       await expect(
-        controller.getByProject('test-project', { version: '1.0.0' })
+        controller.getByProject('test-project', { version: '1.0.0' } as any)
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -129,8 +126,8 @@ describe('SourceMapController', () => {
           filename: 'app.js.map',
           version: '1.0.0',
           uploadedAt: new Date(),
-          expiresAt: new Date()
-        }
+          expiresAt: new Date(),
+        },
       ];
 
       mockSourceMapService.getByProjectAndVersion.mockResolvedValue(mockDocuments);
@@ -164,8 +161,8 @@ describe('SourceMapController', () => {
           totalCount: 100,
           size: 1024,
           newestEntry: new Date(),
-          oldestEntry: new Date()
-        }
+          oldestEntry: new Date(),
+        },
       };
 
       mockSourceMapService.getHealth.mockResolvedValue(mockHealth);
@@ -173,7 +170,7 @@ describe('SourceMapController', () => {
       const result = await controller.health();
 
       expect(result.success).toBe(true);
-      expect(result.status).toBe('healthy');
+      expect(result.health.status).toBe('healthy');
       expect(service.getHealth).toHaveBeenCalled();
     });
   });

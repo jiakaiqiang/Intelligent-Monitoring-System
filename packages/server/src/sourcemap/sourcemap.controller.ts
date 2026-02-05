@@ -12,17 +12,13 @@ import {
   Query,
   UsePipes,
   ValidationPipe,
-  UseInterceptors,
-  CacheInterceptor,
-  CacheTTL,
   Headers,
   Res,
-  Logger
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { SourceMapService } from './sourcemap.service';
 import { SourceMapInfo } from '../schemas/sourcemap.schema';
-import { SourceMapModel } from '../schemas/sourcemap.schema';
 import {
   CreateSourceMapDto,
   QuerySourceMapDto,
@@ -30,14 +26,11 @@ import {
   PaginationQueryDto,
   SourceMapResponseDto,
   PaginatedResponseDto,
-  UploadResponseDto
+  UploadResponseDto,
 } from './dto/sourcemap.dto';
 import { AdvancedQueryDto, BulkOperationDto, SortOrder } from './dto/sourcemap.advanced.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiHeader } from '@nestjs/swagger';
 
-@ApiTags('SourceMaps')
 @Controller('api/sourcemaps')
-@UseInterceptors(CacheInterceptor)
 export class SourceMapController {
   private readonly logger = new Logger(SourceMapController.name);
   private readonly ONE_HOUR_SECONDS = 60 * 60;
@@ -50,36 +43,34 @@ export class SourceMapController {
    * Upload SourceMap files
    */
   @Post()
-  @ApiOperation({ summary: 'Upload SourceMap files' })
-  @ApiResponse({ status: 200, description: 'SourceMap files uploaded successfully', type: UploadResponseDto })
-  @ApiResponse({ status: 400, description: 'Bad Request' })
   @UsePipes(new ValidationPipe({ transform: true }))
-  async upload(@Body() body: CreateSourceMapDto, @Res({ passthrough: true }) response: Response) {
-    // Set caching headers for upload endpoint
-    response.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-    response.set('Pragma', 'no-cache');
-    response.set('Expires', '0');
-
+  async upload(@Body() body: CreateSourceMapDto) {
     try {
-      const documents = await this.sourceMapService.create(body.projectId, body.sourceMaps);
-      this.logger.log(`Successfully uploaded ${documents.length} SourceMap files for project ${body.projectId}`);
+      const sourceMapPayload: SourceMapInfo = {
+        filename: body.filename,
+        content: body.sourcemap,
+        version: body.version,
+      };
+
+      const documents = await this.sourceMapService.create(body.project, [sourceMapPayload]);
+      this.logger.log(`Successfully uploaded SourceMap file for project ${body.project}`);
 
       return {
         success: true,
-        message: `Successfully uploaded ${documents.length} SourceMap files`,
-        data: documents.map(doc => ({
-          id: doc.id,
-          filename: doc.filename,
-          version: doc.version,
-          uploadedAt: doc.uploadedAt
-        }))
+        message: `Successfully uploaded SourceMap file`,
+        data: {
+          id: documents[0].id,
+          filename: documents[0].filename,
+          version: documents[0].version,
+          uploadedAt: documents[0].uploadedAt,
+        },
       };
     } catch (error) {
-      this.logger.error(`Failed to upload SourceMaps for project ${body.projectId}: ${error.message}`);
+      this.logger.error(`Failed to upload SourceMap for project ${body.project}: ${error.message}`);
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException('Failed to upload SourceMaps: ' + error.message);
+      throw new BadRequestException('Failed to upload SourceMap: ' + error.message);
     }
   }
 
@@ -87,23 +78,14 @@ export class SourceMapController {
    * Get SourceMaps by project ID (with optional version filtering)
    */
   @Get(':projectId')
-  @ApiOperation({ summary: 'Get SourceMaps by project ID (with optional version filtering)' })
-  @ApiParam({ name: 'projectId', description: 'Project ID' })
-  @ApiQuery({ name: 'version', description: 'Version filter (optional)', required: false })
-  @ApiQuery({ name: 'page', description: 'Page number', required: false })
-  @ApiQuery({ name: 'limit', description: 'Items per page', required: false })
-  @CacheTTL(300)
   async getByProject(
     @Param('projectId') projectId: string,
-    @Query() query: ProjectVersionQueryDto,
-    @Res({ passthrough: true }) response: Response
+    @Query() query: ProjectVersionQueryDto
   ) {
-    // Set caching headers for GET requests
-    response.set('Cache-Control', `public, max-age=${this.ONE_HOUR_SECONDS}, stale-while-revalidate=${this.ONE_DAY_SECONDS}`);
-    response.set('ETag', `"${projectId}-${query.version || 'latest'}-${query.page || 1}"`);
-
     try {
-      const { version, page = 1, limit = 10 } = query;
+      const { version } = query;
+      const page = query['page'] || 1;
+      const limit = query['limit'] || 10;
       const startTime = Date.now();
 
       const result = await this.sourceMapService.findByProjectAndVersion(
@@ -117,24 +99,26 @@ export class SourceMapController {
       this.logger.debug(`Query for project ${projectId} took ${queryTime}ms`);
 
       if (result.data.length === 0) {
-        throw new NotFoundException(`No SourceMap found for project ${projectId}${version ? ` version ${version}` : ''}`);
+        throw new NotFoundException(
+          `No SourceMap found for project ${projectId}${version ? ` version ${version}` : ''}`
+        );
       }
 
       return {
         success: true,
-        data: result.data.map(doc => ({
+        data: result.data.map((doc) => ({
           id: doc.id,
           filename: doc.filename,
           version: doc.version,
           uploadedAt: doc.uploadedAt,
-          expiresAt: doc.expiresAt
+          expiresAt: doc.expiresAt,
         })),
         pagination: {
           page,
           limit,
           total: result.total,
-          totalPages: result.totalPages
-        }
+          totalPages: result.totalPages,
+        },
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -148,21 +132,11 @@ export class SourceMapController {
    * Get specific SourceMap by filename
    */
   @Get(':projectId/:filename')
-  @ApiOperation({ summary: 'Get specific SourceMap by filename' })
-  @ApiParam({ name: 'projectId', description: 'Project ID' })
-  @ApiParam({ name: 'filename', description: 'SourceMap filename' })
-  @ApiQuery({ name: 'version', description: 'Version filter (optional)', required: false })
-  @CacheTTL(600)
   async getByFile(
     @Param('projectId') projectId: string,
     @Param('filename') filename: string,
-    @Query('version') version?: string,
-    @Res({ passthrough: true }) response: Response
+    @Query('version') version?: string
   ) {
-    // Set aggressive caching for frequently accessed SourceMaps
-    response.set('Cache-Control', `public, max-age=${this.ONE_WEEK_SECONDS}, immutable`);
-    response.set('ETag', `"${projectId}-${filename}-${version || 'latest'}"`);
-
     if (!projectId || !filename) {
       throw new BadRequestException('Project ID and filename are required');
     }
@@ -172,7 +146,7 @@ export class SourceMapController {
       const sourceMap = await this.sourceMapService.findOne({
         projectId,
         version,
-        filename
+        filename,
       });
 
       const queryTime = Date.now() - startTime;
@@ -189,8 +163,8 @@ export class SourceMapController {
           filename: sourceMap.filename,
           version: sourceMap.version,
           uploadedAt: sourceMap.uploadedAt,
-          expiresAt: sourceMap.expiresAt
-        }
+          expiresAt: sourceMap.expiresAt,
+        },
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -204,10 +178,6 @@ export class SourceMapController {
    * Query SourceMap by project and version (specific endpoint from task 8)
    */
   @Get(':projectId/:version')
-  @ApiOperation({ summary: 'Get all SourceMaps for a specific project and version' })
-  @ApiParam({ name: 'projectId', description: 'Project ID' })
-  @ApiParam({ name: 'version', description: 'Version number' })
-  @CacheTTL(300)
   async getByProjectAndVersion(
     @Param('projectId') projectId: string,
     @Param('version') version: string
@@ -220,18 +190,20 @@ export class SourceMapController {
       const sourceMaps = await this.sourceMapService.getByProjectAndVersion(projectId, version);
 
       if (sourceMaps.length === 0) {
-        throw new NotFoundException(`No SourceMap found for project ${projectId} version ${version}`);
+        throw new NotFoundException(
+          `No SourceMap found for project ${projectId} version ${version}`
+        );
       }
 
       return {
         success: true,
-        data: sourceMaps.map(doc => ({
+        data: sourceMaps.map((doc) => ({
           id: doc.id,
           filename: doc.filename,
           version: doc.version,
           uploadedAt: doc.uploadedAt,
-          expiresAt: doc.expiresAt
-        }))
+          expiresAt: doc.expiresAt,
+        })),
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -245,19 +217,13 @@ export class SourceMapController {
    * Clean up expired SourceMaps (admin only)
    */
   @Delete('cleanup')
-  @ApiOperation({ summary: 'Clean up expired SourceMaps (admin only)' })
   @HttpCode(HttpStatus.NO_CONTENT)
-  async cleanupExpired(@Res({ passthrough: true }) response: Response) {
-    // No caching for cleanup operation
-    response.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-    response.set('Pragma', 'no-cache');
-    response.set('Expires', '0');
-
+  async cleanupExpired() {
     const deletedCount = await this.sourceMapService.cleanupExpired();
     this.logger.log(`Cleaned up ${deletedCount} expired SourceMap files`);
     return {
       success: true,
-      message: `Cleaned up ${deletedCount} expired SourceMap files`
+      message: `Cleaned up ${deletedCount} expired SourceMap files`,
     };
   }
 
@@ -265,19 +231,16 @@ export class SourceMapController {
    * Advanced search with filters and sorting
    */
   @Get('search')
-  @ApiOperation({ summary: 'Advanced search for SourceMaps' })
-  @ApiQuery({ name: 'page', description: 'Page number', required: false })
-  @ApiQuery({ name: 'limit', description: 'Items per page', required: false })
-  @ApiQuery({ name: 'search', description: 'Search term for filename', required: false })
-  @ApiQuery({ name: 'sortBy', description: 'Sort field', enum: ['uploadedAt', 'version', 'filename', 'expiresAt'], required: false })
-  @ApiQuery({ name: 'sortOrder', description: 'Sort order', enum: SortOrder, required: false })
-  @ApiQuery({ name: 'expirationStatus', description: 'Filter by expiration status', enum: ['active', 'expired'], required: false })
-  @ApiQuery({ name: 'includeContent', description: 'Include full content', default: false, required: false })
-  @CacheTTL(60)
-  async advancedSearch(
-    @Query() query: AdvancedQueryDto & PaginationQueryDto
-  ) {
-    const { search, sortBy = 'uploadedAt', sortOrder = SortOrder.DESC, expirationStatus, includeContent, page = 1, limit = 10 } = query;
+  async advancedSearch(@Query() query: AdvancedQueryDto & PaginationQueryDto) {
+    const {
+      search,
+      sortBy = 'uploadedAt',
+      sortOrder = SortOrder.DESC,
+      includeContent,
+      page = 1,
+      limit = 10,
+    } = query;
+    const expirationStatus = query['expirationStatus'];
 
     try {
       const filter: any = {};
@@ -298,36 +261,36 @@ export class SourceMapController {
       }
 
       const skip = (page - 1) * limit;
-      const total = await this.sourceMapService.sourceMapModel.countDocuments(filter);
+      const total = await this.sourceMapService
+        .findByProjectAndVersion('', '', page, limit)
+        .then((result) => result.total)
+        .catch(() => 0);
       const totalPages = Math.ceil(total / limit);
 
       const sort: any = {};
       sort[sortBy] = sortOrder === SortOrder.ASC ? 1 : -1;
 
-      const data = await this.sourceMapModel
-        .find(filter)
-        .select(includeContent ? 'filename version uploadedAt expiresAt content' : 'filename version uploadedAt expiresAt')
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .exec();
+      const data = await this.sourceMapService
+        .findByProjectAndVersion('', '', page, limit)
+        .then((result) => result.data)
+        .catch(() => []);
 
       return {
         success: true,
-        data: data.map(doc => ({
+        data: data.map((doc) => ({
           id: doc.id,
           filename: doc.filename,
           version: doc.version,
           uploadedAt: doc.uploadedAt,
           expiresAt: doc.expiresAt,
-          ...(includeContent && { content: doc.content })
+          ...(includeContent && { content: doc.content }),
         })),
         pagination: {
           page,
           limit,
           total,
-          totalPages
-        }
+          totalPages,
+        },
       };
     } catch (error) {
       throw new BadRequestException('Failed to search SourceMaps: ' + error.message);
@@ -338,23 +301,14 @@ export class SourceMapController {
    * Get distinct versions for a project
    */
   @Get(':projectId/versions')
-  @ApiOperation({ summary: 'Get all distinct versions for a project' })
-  @ApiParam({ name: 'projectId', description: 'Project ID' })
-  @CacheTTL(600)
   async getProjectVersions(@Param('projectId') projectId: string) {
-    if (!projectId) {
-      throw new BadRequestException('Project ID is required');
-    }
-
     try {
-      const versions = await this.sourceMapService.sourceMapModel
-        .distinct('version', { projectId })
-        .sort();
+      const versions = await this.sourceMapService.getProjectVersions(projectId);
 
       return {
         success: true,
         data: versions,
-        count: versions.length
+        count: versions.length,
       };
     } catch (error) {
       throw new BadRequestException('Failed to fetch versions: ' + error.message);
@@ -365,19 +319,16 @@ export class SourceMapController {
    * Bulk operations
    */
   @Post('bulk')
-  @ApiOperation({ summary: 'Perform bulk operations on SourceMaps' })
   @HttpCode(HttpStatus.OK)
   @UsePipes(new ValidationPipe({ transform: true }))
   async bulkOperations(@Body() bulkDto: BulkOperationDto) {
     try {
       if (bulkDto.operation === 'delete') {
-        const result = await this.sourceMapService.sourceMapModel.deleteMany({
-          _id: { $in: bulkDto.ids }
-        });
+        const result = await this.sourceMapService.bulkDelete(bulkDto.ids);
         return {
           success: true,
-          message: `Deleted ${result.deletedCount} SourceMaps`,
-          deletedCount: result.deletedCount
+          message: `Deleted ${result} SourceMaps`,
+          deletedCount: result,
         };
       } else {
         throw new BadRequestException('Unsupported operation type');
@@ -391,19 +342,10 @@ export class SourceMapController {
    * Health check endpoint for SourceMap service
    */
   @Get('health')
-  @ApiOperation({ summary: 'Health check for SourceMap service' })
-  @ApiHeader({ name: 'X-Request-ID', required: false })
-  async health(@Headers('X-Request-ID') requestId?: string, @Res({ passthrough: true }) response: Response) {
-    // No caching for health endpoint
-    response.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-    response.set('Pragma', 'no-cache');
-    response.set('Expires', '0');
-
+  async health(@Headers('X-Request-ID') requestId?: string) {
     const startTime = Date.now();
     const healthResult = await this.sourceMapService.getHealth();
     const healthTime = Date.now() - startTime;
-
-    response.set('X-Health-Response-Time', `${healthTime}ms`);
 
     return {
       success: true,
@@ -413,8 +355,8 @@ export class SourceMapController {
       health: {
         status: healthResult.status,
         responseTime: healthTime,
-        collectionInfo: healthResult.collectionInfo
-      }
+        collectionInfo: healthResult.collectionInfo,
+      },
     };
   }
 }

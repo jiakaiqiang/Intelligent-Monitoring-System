@@ -11,7 +11,14 @@ export class CreateSourceMapDto {
   @IsString()
   version: string;
 
-  @ApiProperty({ description: 'Source map file content (base64 encoded)', example: 'eyJzdHJpbmdzIjpbXX0=' })
+  @ApiProperty({ description: 'Source map filename', example: 'app.js.map' })
+  @IsString()
+  filename: string;
+
+  @ApiProperty({
+    description: 'Source map file content (base64 encoded)',
+    example: 'eyJzdHJpbmdzIjpbXX0=',
+  })
   @IsString()
   sourcemap: string;
 
@@ -31,16 +38,24 @@ export class CreateSourceMapDto {
   @Transform(({ value }) => parseInt(value, 10))
   buildTimestamp?: number;
 
-  @ApiProperty({ description: 'Source map metadata (JSON object)', example: { compiler: 'webpack', sourceMapVersion: 3 }, required: false })
+  @ApiProperty({
+    description: 'Source map metadata (JSON object)',
+    example: { compiler: 'webpack', sourceMapVersion: 3 },
+    required: false,
+  })
   @IsObject()
   @IsOptional()
   metadata?: Record<string, any>;
 
-  @ApiProperty({ description: 'Associated source files (base64 encoded)', example: ['file1.js', 'file2.js'], required: false })
+  @ApiProperty({
+    description: 'Associated source files (base64 encoded)',
+    example: ['file1.js', 'file2.js'],
+    required: false,
+  })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
-  @Transform(({ value }) => Array.isArray(value) ? value : [value])
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
   sources?: string[];
 }
 
@@ -72,13 +87,15 @@ export class QuerySourceMapDto {
 }
 
 export class ProjectVersionQueryDto {
-  @ApiProperty({ description: 'Project name', example: 'my-project' })
+  @ApiProperty({ description: 'Project name', example: 'my-project', required: false })
   @IsString()
-  project: string;
+  @IsOptional()
+  project?: string;
 
-  @ApiProperty({ description: 'Project version', example: '1.0.0' })
+  @ApiProperty({ description: 'Project version', example: '1.0.0', required: false })
   @IsString()
-  version: string;
+  @IsOptional()
+  version?: string;
 
   @ApiProperty({ description: 'Application name', example: 'web-app', required: false })
   @IsString()

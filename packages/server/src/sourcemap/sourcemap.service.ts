@@ -1,11 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, CACHE_MANAGER, Inject } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { SourceMapEntity, SourceMapDocument } from '../schemas/sourcemap.schema';
 import { SourceMapInfo } from '../schemas/sourcemap.schema';
 import * as sourceMap from 'source-map';
-import { ProjectVersionQueryDto } from './dto/sourcemap.dto';
-import { Cache } from 'cache-manager';
 
 export interface SourceMapQuery {
   projectId: string;
@@ -17,45 +15,41 @@ export interface SourceMapQuery {
 export class SourceMapService {
   constructor(
     @InjectModel(SourceMapEntity.name)
-    private readonly sourceMapModel: Model<SourceMapDocument>,
-    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private readonly sourceMapModel: Model<SourceMapDocument>
   ) {}
 
   /**
    * 保存 SourceMap
    */
   async create(projectId: string, sourceMaps: SourceMapInfo[]): Promise<SourceMapDocument[]> {
-    const documents = [];
+    const documents: SourceMapDocument[] = [];
 
     for (const sm of sourceMaps) {
-      // 验证必需字段
       if (!sm.filename || !sm.content) {
         throw new BadRequestException('SourceMap must have filename and content');
       }
 
-      // 检查是否已存在相同的 SourceMap
-      const existing = await this.sourceMapModel.findOne({
-        projectId,
-        version: sm.version || 'unknown',
-        filename: sm.filename,
-      });
+      const version = sm.version || 'unknown';
+      const existing = await this.sourceMapModel
+        .findOne({ projectId, version, filename: sm.filename })
+        .exec();
 
       if (existing) {
-        // 更新现有的 SourceMap
         existing.content = sm.content;
         existing.updatedAt = new Date();
         documents.push(await existing.save());
-      } else {
-        // 创建新的 SourceMap
-        const document = new this.sourceMapModel({
-          projectId,
-          version: sm.version || 'unknown',
-          filename: sm.filename,
-          content: sm.content,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30天后过期
-        });
-        documents.push(await document.save());
+        continue;
       }
+
+      const created = await this.sourceMapModel.create({
+        projectId,
+        version,
+        filename: sm.filename,
+        content: sm.content,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      documents.push(created);
     }
 
     return documents;
@@ -64,36 +58,32 @@ export class SourceMapService {
   /**
    * Query SourceMap with optimized caching and pagination
    */
-  async find(query: SourceMapQuery, page?: number, limit?: number): Promise<{
+  async find(
+    query: SourceMapQuery,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<{
     data: SourceMapDocument[];
     total: number;
     totalPages: number;
   }> {
     const { projectId, version, filename } = query;
 
-    // Generate cache key
-    const cacheKey = `sourcemap:find:${projectId}:${version || 'latest'}:${filename || 'all'}:${page}:${limit}`;
-
-    // Check cache first
-    const cachedResult = await this.cacheManager.get(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
     const filter: any = { projectId };
     if (version) filter.version = version;
     if (filename) filter.filename = filename;
 
-    const skip = (page - 1) * limit;
+    const currentPage = Math.max(1, page);
+    const pageSize = Math.max(1, limit);
+    const skip = (currentPage - 1) * pageSize;
     const total = await this.sourceMapModel.countDocuments(filter);
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(total / pageSize) || 1;
 
     const data = await this.sourceMapModel
       .find(filter)
       .sort({ uploadedAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .lean({ leanWithId: true }) // Use lean queries for better performance
+      .limit(pageSize)
       .exec();
 
     const result = {
@@ -101,9 +91,6 @@ export class SourceMapService {
       total,
       totalPages,
     };
-
-    // Cache result for 5 minutes
-    await this.cacheManager.set(cacheKey, result, 300 * 1000);
 
     return result;
   }
@@ -114,28 +101,15 @@ export class SourceMapService {
   async findOne(query: SourceMapQuery): Promise<SourceMapDocument | null> {
     const { projectId, version, filename } = query;
 
-    // Generate cache key
-    const cacheKey = `sourcemap:findOne:${projectId}:${version || 'latest'}:${filename}`;
-
-    // Check cache first
-    const cachedResult = await this.cacheManager.get(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
     const filter: any = { projectId };
     if (version) filter.version = version;
     if (filename) filter.filename = filename;
 
     // Use projection to only fetch necessary fields for lookup
-    const result = this.sourceMapModel
+    const result = await this.sourceMapModel
       .findOne(filter)
       .select('_id filename version uploadedAt expiresAt content')
-      .lean({ leanWithId: true })
       .exec();
-
-    // Cache result for 10 minutes
-    await this.cacheManager.set(cacheKey, result, 600 * 1000);
 
     return result;
   }
@@ -157,26 +131,16 @@ export class SourceMapService {
     page: number;
     limit: number;
   }> {
-    // Generate cache key
-    const cacheKey = `sourcemap:advanced:${JSON.stringify(filter)}:${page}:${limit}:${sortBy}:${sortOrder}:${includeContent}`;
-
-    // Check cache first
-    const cachedResult = await this.cacheManager.get(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    const skip = (page - 1) * limit;
+    const currentPage = Math.max(1, page);
+    const pageSize = Math.max(1, limit);
+    const skip = (currentPage - 1) * pageSize;
 
     // Use aggregation for better performance on complex queries
-    const totalPipeline = [
-      { $match: filter },
-      { $count: 'total' }
-    ];
+    const totalPipeline = [{ $match: filter }, { $count: 'total' }];
 
     const totalResult = await this.sourceMapModel.aggregate(totalPipeline).exec();
     const total = totalResult[0]?.total || 0;
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(total / pageSize) || 1;
 
     const sort: any = {};
     sort[sortBy] = sortOrder === 'ASC' ? 1 : -1;
@@ -190,20 +154,16 @@ export class SourceMapService {
       .select(projection)
       .sort(sort)
       .skip(skip)
-      .limit(limit)
-      .lean({ leanWithId: true })
+      .limit(pageSize)
       .exec();
 
     const result = {
       data,
       total,
       totalPages,
-      page,
-      limit,
+      page: currentPage,
+      limit: pageSize,
     };
-
-    // Cache result for 1 minute since these are potentially dynamic searches
-    await this.cacheManager.set(cacheKey, result, 60 * 1000);
 
     return result;
   }
@@ -212,22 +172,7 @@ export class SourceMapService {
    * Get distinct versions for a project with caching
    */
   async getProjectVersions(projectId: string): Promise<string[]> {
-    // Generate cache key
-    const cacheKey = `sourcemap:versions:${projectId}`;
-
-    // Check cache first
-    const cachedResult = await this.cacheManager.get(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    const result = await this.sourceMapModel
-      .distinct('version', { projectId })
-      .lean()
-      .sort();
-
-    // Cache result for 10 minutes
-    await this.cacheManager.set(cacheKey, result, 600 * 1000);
+    const result = await this.sourceMapModel.distinct('version', { projectId }).sort();
 
     return result;
   }
@@ -250,23 +195,18 @@ export class SourceMapService {
       const threshold = new Date(now.getTime() - 5 * 60 * 1000); // 5 minutes ago
 
       // Execute parallel queries for better performance
-      const [
-        totalCount,
-        { totalSize },
-        newestEntry,
-        oldestEntry,
-        recentCount
-      ] = await Promise.all([
-        this.sourceMapModel.countDocuments({}).exec(),
-        this.sourceMapModel.aggregate([
-          { $group: { _id: null, totalSize: { $sum: { $strLenCP: '$content' } } } }
-        ]).exec(),
-        this.sourceMapModel.findOne().sort({ uploadedAt: -1 }).exec(),
-        this.sourceMapModel.findOne().sort({ uploadedAt: 1 }).exec(),
-        this.sourceMapModel.countDocuments({ uploadedAt: { $gte: threshold } }).exec()
-      ]);
+      const [totalCount, totalSizeResult, newestEntry, oldestEntry, recentCount] =
+        await Promise.all([
+          this.sourceMapModel.countDocuments({}).exec(),
+          this.sourceMapModel
+            .aggregate([{ $group: { _id: null, totalSize: { $sum: { $strLenCP: '$content' } } } }])
+            .exec(),
+          this.sourceMapModel.findOne().sort({ uploadedAt: -1 }).exec(),
+          this.sourceMapModel.findOne().sort({ uploadedAt: 1 }).exec(),
+          this.sourceMapModel.countDocuments({ uploadedAt: { $gte: threshold } }).exec(),
+        ]);
 
-      const size = totalSize || 0;
+      const size = totalSizeResult?.[0]?.totalSize || 0;
 
       let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
       if (recentCount === 0) {
@@ -299,8 +239,8 @@ export class SourceMapService {
   async findByProjectAndVersion(
     projectId: string,
     version?: string,
-    page?: number,
-    limit?: number
+    page: number = 1,
+    limit: number = 10
   ): Promise<{
     data: SourceMapDocument[];
     total: number;
@@ -309,15 +249,17 @@ export class SourceMapService {
     const filter: any = { projectId };
     if (version) filter.version = version;
 
-    const skip = (page - 1) * limit;
+    const currentPage = Math.max(1, page);
+    const pageSize = Math.max(1, limit);
+    const skip = (currentPage - 1) * pageSize;
     const total = await this.sourceMapModel.countDocuments(filter);
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(total / pageSize) || 1;
 
     const data = await this.sourceMapModel
       .find(filter)
       .sort({ uploadedAt: -1 })
       .skip(skip)
-      .limit(limit)
+      .limit(pageSize)
       .exec();
 
     return {
@@ -330,28 +272,9 @@ export class SourceMapService {
   /**
    * Get SourceMap by project and version (single endpoint from task 8)
    */
-  async getByProjectAndVersion(
-    projectId: string,
-    version: string
-  ): Promise<SourceMapDocument[]> {
-    // Generate cache key
-    const cacheKey = `sourcemap:getByProjectAndVersion:${projectId}:${version}`;
-
-    // Check cache first
-    const cachedResult = await this.cacheManager.get(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
+  async getByProjectAndVersion(projectId: string, version: string): Promise<SourceMapDocument[]> {
     const filter: any = { projectId, version };
-    const result = this.sourceMapModel
-      .find(filter)
-      .sort({ uploadedAt: -1 })
-      .lean({ leanWithId: true })
-      .exec();
-
-    // Cache result for 5 minutes
-    await this.cacheManager.set(cacheKey, result, 300 * 1000);
+    const result = await this.sourceMapModel.find(filter).sort({ uploadedAt: -1 }).exec();
 
     return result;
   }
@@ -410,18 +333,17 @@ export class SourceMapService {
 
     // 1. 优先根据版本和文件名精确匹配
     if (version) {
-      const exactMatch = result.data.find(sm =>
-        sm.version === version &&
-        (sm.filename === `${file}.map` || sm.filename.includes(file))
+      const exactMatch = result.data.find(
+        (sm) =>
+          sm.version === version && (sm.filename === `${file}.map` || sm.filename.includes(file))
       );
       if (exactMatch) return exactMatch;
     }
 
     // 2. 根据文件名匹配
-    const filenameMatch = result.data.find(sm =>
-      sm.filename === `${file}.map` ||
-      sm.filename.endsWith(file) ||
-      sm.filename.includes(file)
+    const filenameMatch = result.data.find(
+      (sm) =>
+        sm.filename === `${file}.map` || sm.filename.endsWith(file) || sm.filename.includes(file)
     );
     if (filenameMatch) return filenameMatch;
 
@@ -445,7 +367,7 @@ export class SourceMapService {
    */
   async bulkDelete(ids: string[]): Promise<number> {
     const result = await this.sourceMapModel.deleteMany({
-      _id: { $in: ids }
+      _id: { $in: ids },
     });
     return result.deletedCount || 0;
   }
@@ -474,15 +396,15 @@ export class SourceMapService {
                   $cond: {
                     if: { $gte: ['$expiresAt', new Date()] },
                     then: 'active',
-                    else: 'expired'
-                  }
+                    else: 'expired',
+                  },
                 },
-                count: { $sum: 1 }
-              }
-            }
-          ]
-        }
-      }
+                count: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
     ];
 
     const result = await this.sourceMapModel.aggregate(pipeline).exec();
@@ -490,18 +412,18 @@ export class SourceMapService {
     const stats = result[0];
     const total = stats.count[0]?.total || 0;
     const totalSize = stats.size[0]?.totalSize || 0;
-    const versionMap = Object.fromEntries(stats.versions.map(v => [v._id, v.count]));
+    const versionMap = Object.fromEntries(stats.versions.map((v) => [v._id, v.count]));
     const versions = Object.keys(versionMap).sort();
 
-    const active = stats.status.find(s => s._id === 'active')?.count || 0;
-    const expired = stats.status.find(s => s._id === 'expired')?.count || 0;
+    const active = stats.status.find((s) => s._id === 'active')?.count || 0;
+    const expired = stats.status.find((s) => s._id === 'expired')?.count || 0;
 
     return {
       totalFiles: total,
       totalSize,
       versions,
       expiredCount: expired,
-      expiringSoonCount: Math.min(total - active, 100) // Estimate
+      expiringSoonCount: Math.min(total - active, 100), // Estimate
     };
   }
 }

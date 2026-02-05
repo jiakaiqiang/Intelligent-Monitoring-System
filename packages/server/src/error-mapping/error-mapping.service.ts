@@ -114,7 +114,8 @@ export class ErrorMappingService {
     const version = error.version;
 
     // 从数据库获取 SourceMap
-    const sourceMaps = await this.sourceMapService.findByProjectAndVersion(projectId, version);
+    const sourceMapsResult = await this.sourceMapService.findByProjectAndVersion(projectId, version);
+    const sourceMaps = sourceMapsResult.data;
 
     if (sourceMaps.length === 0) {
       // 没有找到 SourceMap，返回原始错误

@@ -1,18 +1,11 @@
-import { DocumentBuilder, SwaggerDocumentConfig, SwaggerCustomOptions } from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerCustomOptions } from '@nestjs/swagger';
 
-export const swaggerConfig: SwaggerDocumentConfig = new DocumentBuilder()
+export const swaggerConfig = new DocumentBuilder()
   .setTitle('SourceMap API')
   .setDescription('SourceMap management API endpoints for intelligent monitoring system')
   .setVersion('1.0.0')
-  .setContact(
-    name: 'API Support',
-    email: 'support@monitoring.com',
-    url: 'https://monitoring.com/docs',
-  )
-  .setLicense(
-    name: 'MIT',
-    url: 'https://opensource.org/licenses/MIT',
-  )
+  .setContact('API Support', 'support@monitoring.com', 'https://monitoring.com/docs')
+  .setLicense('MIT', 'https://opensource.org/licenses/MIT')
   .addTag('SourceMaps', 'SourceMap upload and management')
   .addTag('Error Reports', 'Error report analysis and management')
   .addTag('AI Analysis', 'AI-powered error analysis and recommendations')
@@ -23,7 +16,7 @@ export const swaggerConfig: SwaggerDocumentConfig = new DocumentBuilder()
       type: 'apiKey',
       name: 'X-API-Key',
       in: 'header',
-      description: 'API key for authentication'
+      description: 'API key for authentication',
     },
     'api-key'
   )
@@ -61,5 +54,4 @@ export const swaggerCustomOptions: SwaggerCustomOptions = {
   customCssUrl: '',
   customSiteTitle: 'SourceMap API Documentation',
   customJs: [],
-  customJsUrl: [],
 };

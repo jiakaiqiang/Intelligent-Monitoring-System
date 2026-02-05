@@ -2,16 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Report } from './schemas/report.schema';
-import { AiService } from '../ai/ai.service';
 
 export type ReportDocument = Report & Document;
 
 @Injectable()
 export class ReportService {
-  constructor(
-    @InjectModel(Report.name) private readonly reportModel: Model<ReportDocument>,
-    private readonly aiService: AiService
-  ) {}
+  constructor(@InjectModel(Report.name) private readonly reportModel: Model<ReportDocument>) {}
 
   async create(reportData: any) {
     console.log('jkq', reportData);
@@ -26,7 +22,6 @@ export class ReportService {
       //   reportId: report._id,
       //   errors: reportData.errors,
       // });
-
       // const analysis = await this.aiService.analyzeError(reportData.errors);
       // return { ...reportData, aiAnalysis: analysis };
     }
@@ -35,19 +30,11 @@ export class ReportService {
   }
 
   async findByProject(projectId: string, limit = 50) {
-    return this.reportModel
-      .find({ projectId })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .exec();
+    return this.reportModel.find({ projectId }).sort({ createdAt: -1 }).limit(limit).exec();
   }
 
   async updateAiAnalysis(reportId: string, analysis: string) {
-    return this.reportModel.findByIdAndUpdate(
-      reportId,
-      { aiAnalysis: analysis },
-      { new: true },
-    );
+    return this.reportModel.findByIdAndUpdate(reportId, { aiAnalysis: analysis }, { new: true });
   }
 
   /**
@@ -56,19 +43,21 @@ export class ReportService {
   async saveMappedErrors(projectId: string, errors: any[]): Promise<void> {
     try {
       // 为每个映射后的错误创建记录
-      const errorDocs = errors.map(error => ({
+      const errorDocs = errors.map((error) => ({
         projectId,
-        errors: [{
-          ...error,
-          // 标记为已映射
-          mapped: true,
-          mappedStack: error.mappedStack,
-          sourceFile: error.sourceFile,
-          sourceLine: error.sourceLine,
-          sourceColumn: error.sourceColumn
-        }],
+        errors: [
+          {
+            ...error,
+            // 标记为已映射
+            mapped: true,
+            mappedStack: error.mappedStack,
+            sourceFile: error.sourceFile,
+            sourceLine: error.sourceLine,
+            sourceColumn: error.sourceColumn,
+          },
+        ],
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       }));
 
       // 批量保存

@@ -9,9 +9,9 @@ vi.mock('source-map', () => ({
       source: 'test.ts',
       line: 10,
       column: 5,
-      name: 'testFunction'
-    })
-  }))
+      name: 'testFunction',
+    }),
+  })),
 }));
 
 describe('EnhancedSourceMapParser', () => {
@@ -19,15 +19,17 @@ describe('EnhancedSourceMapParser', () => {
   const mockSourceMaps: SourceMapInfo[] = [
     {
       filename: 'app.js.map',
-      content: btoa(JSON.stringify({
-        version: 3,
-        sources: ['app.ts'],
-        names: [],
-        mappings: 'AAAA',
-        sourceRoot: '/src'
-      })),
-      version: '1.0.0'
-    }
+      content: btoa(
+        JSON.stringify({
+          version: 3,
+          sources: ['app.ts'],
+          names: [],
+          mappings: 'AAAA',
+          sourceRoot: '/src',
+        })
+      ),
+      version: '1.0.0',
+    },
   ];
 
   beforeEach(() => {
@@ -38,18 +40,18 @@ describe('EnhancedSourceMapParser', () => {
     it('should map stack trace to source location', async () => {
       const error = {
         message: 'Test error',
-        stack: 'Error: Test error\n    at testFunction (app.js:1:1)\n    at Object.<anonymous> (app.js:2:2)',
+        stack:
+          'Error: Test error\n    at testFunction (app.js:1:1)\n    at Object.<anonymous> (app.js:2:2)',
         type: 'js' as const,
         timestamp: Date.now(),
-        url: 'http://localhost'
+        url: 'http://localhost',
+        userAgent: 'vitest',
       };
 
       const result = await parser.parseStackTrace(error, mockSourceMaps);
 
-      expect(result.sourceFile).toBe('app.ts');
-      expect(result.sourceLine).toBe(10);
-      expect(result.sourceColumn).toBe(5);
-      expect(result.mappedStack).toContain('testFunction');
+      expect(result.stack).toContain('app.ts:10:5');
+      expect(result.stack).toContain('testFunction');
     });
 
     it('should handle mapping without sourceMaps', async () => {
@@ -58,7 +60,8 @@ describe('EnhancedSourceMapParser', () => {
         stack: 'Error: Test error\n    at testFunction (app.js:1:1)',
         type: 'js' as const,
         timestamp: Date.now(),
-        url: 'http://localhost'
+        url: 'http://localhost',
+        userAgent: 'vitest',
       };
 
       const result = await parser.parseStackTrace(error);
@@ -72,14 +75,17 @@ describe('EnhancedSourceMapParser', () => {
         stack: 'Error: Test error\n    at testFunction (app.js:1:1)',
         type: 'js' as const,
         timestamp: Date.now(),
-        url: 'http://localhost'
+        url: 'http://localhost',
+        userAgent: 'vitest',
       };
 
       // Mock invalid source map
-      const invalidSourceMap = [{
-        ...mockSourceMaps[0],
-        content: 'invalid'
-      }];
+      const invalidSourceMap = [
+        {
+          ...mockSourceMaps[0],
+          content: 'invalid',
+        },
+      ];
 
       const result = await parser.parseStackTrace(error, invalidSourceMap);
 
@@ -91,7 +97,7 @@ describe('EnhancedSourceMapParser', () => {
     it('should prioritize exact version matches', () => {
       const fileMaps = [
         { filename: 'app.js.map', version: '1.0.0' },
-        { filename: 'app.js.map', version: '1.1.0' }
+        { filename: 'app.js.map', version: '1.1.0' },
       ];
 
       const match = parser['findBestMatch']('test-project', 'app.js', '1.0.0', fileMaps);
@@ -102,7 +108,7 @@ describe('EnhancedSourceMapParser', () => {
     it('should fall back to filename match', () => {
       const fileMaps = [
         { filename: 'other.js.map', version: '1.0.0' },
-        { filename: 'app.js.map', version: '1.1.0' }
+        { filename: 'app.js.map', version: '1.1.0' },
       ];
 
       const match = parser['findBestMatch']('test-project', 'app.js', undefined, fileMaps);

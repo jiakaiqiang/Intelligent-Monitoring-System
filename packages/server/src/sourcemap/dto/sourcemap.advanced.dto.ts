@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsOptional, IsArray, IsBoolean, IsObject, IsEnum, IsNumber } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { PaginationQueryDto } from './sourcemap.dto';
 
 export enum SortOrder {
   ASC = 'asc',

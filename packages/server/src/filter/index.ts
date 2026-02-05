@@ -1,3 +1,3 @@
-import { CompressionFilter } from './compression.filter';
+import { CompressionInterceptor } from './compression.filter';
 
-export { CompressionFilter };
+export { CompressionInterceptor };

@@ -10,6 +10,10 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "paths": {
+      "@monitor/sdk/*": ["../sdk/*"],
+      "@monitor/shared/*": ["../shared/*"]
+    },
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": false,

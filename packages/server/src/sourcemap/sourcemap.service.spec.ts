@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SourceMapService } from './sourcemap.service';
 import { getModelToken } from '@nestjs/mongoose';
-import { SourceMapDocument } from '../schemas/sourcemap.schema';
-import { Cache } from 'cache-manager';
+import { SourceMapEntity } from '../schemas/sourcemap.schema';
 
 const mockModel = {
   find: jest.fn(),
@@ -17,12 +16,9 @@ const mockModel = {
   skip: jest.fn(),
   limit: jest.fn(),
   exec: jest.fn(),
-  save: jest.fn()
-};
-
-const mockCacheManager = {
-  get: jest.fn(),
-  set: jest.fn()
+  save: jest.fn(),
+  create: jest.fn(),
+  updateMany: jest.fn(),
 };
 
 describe('SourceMapService', () => {
@@ -34,18 +30,14 @@ describe('SourceMapService', () => {
       providers: [
         SourceMapService,
         {
-          provide: getModelToken(SourceMapDocument.name),
-          useValue: mockModel
+          provide: getModelToken(SourceMapEntity.name),
+          useValue: mockModel,
         },
-        {
-          provide: 'CACHE_MANAGER',
-          useValue: mockCacheManager
-        }
-      ]
+      ],
     }).compile();
 
     service = module.get<SourceMapService>(SourceMapService);
-    model = module.get(getModelToken(SourceMapDocument.name));
+    model = module.get(getModelToken(SourceMapEntity.name));
   });
 
   afterEach(() => {
@@ -57,8 +49,8 @@ describe('SourceMapService', () => {
       const sourceMaps = [
         {
           filename: 'app.js.map',
-          content: 'test-content'
-        }
+          content: 'test-content',
+        },
       ];
 
       const mockDocument = {
@@ -66,11 +58,11 @@ describe('SourceMapService', () => {
         filename: 'app.js.map',
         version: '1.0.0',
         uploadedAt: new Date(),
-        save: jest.fn().mockResolvedValue(null)
+        save: jest.fn().mockResolvedValue(null),
       };
 
-      mockModel.findOne.mockResolvedValue(null);
-      mockModel.create.mockResolvedValue([mockDocument]);
+      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      mockModel.create.mockResolvedValue(mockDocument);
 
       const result = await service.create('test-project', sourceMaps);
 
@@ -83,8 +75,8 @@ describe('SourceMapService', () => {
       const sourceMaps = [
         {
           filename: 'app.js.map',
-          content: 'new-content'
-        }
+          content: 'new-content',
+        },
       ];
 
       const existingDoc = {
@@ -94,10 +86,10 @@ describe('SourceMapService', () => {
         content: 'old-content',
         uploadedAt: new Date(),
         updatedAt: new Date(),
-        save: jest.fn().mockResolvedValue(null)
+        save: jest.fn().mockResolvedValue(null),
       };
 
-      mockModel.findOne.mockResolvedValue(existingDoc);
+      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(existingDoc) });
 
       const result = await service.create('test-project', sourceMaps);
 
@@ -111,48 +103,52 @@ describe('SourceMapService', () => {
     it('should find source maps with caching', async () => {
       const query = {
         projectId: 'test-project',
-        version: '1.0.0'
+        version: '1.0.0',
       };
 
       const mockResult = {
         data: [],
         total: 0,
-        totalPages: 0
+        totalPages: 0,
       };
 
-      mockCacheManager.get.mockResolvedValue(null);
       mockModel.countDocuments.mockResolvedValue(0);
       mockModel.find.mockReturnValue({
         sort: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
-        lean: jest.fn().mockResolvedValue([])
+        exec: jest.fn().mockResolvedValue([]),
       });
 
       const result = await service.find(query, 1, 10);
 
       expect(result).toEqual(mockResult);
-      expect(mockCacheManager.set).toHaveBeenCalled();
+      expect(mockModel.countDocuments).toHaveBeenCalled();
     });
 
     it('should return cached result', async () => {
       const query = {
         projectId: 'test-project',
-        version: '1.0.0'
+        version: '1.0.0',
       };
 
       const cachedResult = {
         data: [],
         total: 0,
-        totalPages: 0
+        totalPages: 0,
       };
 
-      mockCacheManager.get.mockResolvedValue(cachedResult);
+      mockModel.countDocuments.mockResolvedValue(0);
+      mockModel.find.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      });
 
       const result = await service.find(query, 1, 10);
 
-      expect(result).toBe(cachedResult);
-      expect(mockModel.countDocuments).not.toHaveBeenCalled();
+      expect(result).toEqual(cachedResult);
     });
   });
 
@@ -160,25 +156,24 @@ describe('SourceMapService', () => {
     it('should find single source map', async () => {
       const query = {
         projectId: 'test-project',
-        filename: 'app.js.map'
+        filename: 'app.js.map',
       };
 
       const mockDocument = {
         id: '123',
         filename: 'app.js.map',
-        version: '1.0.0'
+        version: '1.0.0',
       };
 
-      mockCacheManager.get.mockResolvedValue(null);
+      const execMock = jest.fn().mockResolvedValue(mockDocument);
       mockModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnThis(),
-        lean: jest.fn().mockResolvedValue(mockDocument)
+        select: jest.fn().mockReturnValue({ exec: execMock }),
       });
 
       const result = await service.findOne(query);
 
       expect(result).toEqual(mockDocument);
-      expect(mockCacheManager.set).toHaveBeenCalled();
+      expect(mockModel.findOne).toHaveBeenCalled();
     });
   });
 
@@ -193,26 +188,26 @@ describe('SourceMapService', () => {
           filename: 'app.js.map',
           version: '1.0.0',
           uploadedAt: new Date(),
-          expiresAt: new Date()
-        }
+          expiresAt: new Date(),
+        },
       ];
 
-      mockCacheManager.get.mockResolvedValue(null);
+      const execMock = jest.fn().mockResolvedValue(mockDocuments);
       mockModel.find.mockReturnValue({
-        sort: jest.fn().mockResolvedValue(mockDocuments)
+        sort: jest.fn().mockReturnValue({ exec: execMock }),
       });
 
       const result = await service.getByProjectAndVersion(projectId, version);
 
       expect(result).toEqual(mockDocuments);
-      expect(mockCacheManager.set).toHaveBeenCalled();
+      expect(mockModel.find).toHaveBeenCalled();
     });
   });
 
   describe('cleanupExpired', () => {
     it('should delete expired source maps', async () => {
       const mockResult = {
-        deletedCount: 5
+        deletedCount: 5,
       };
 
       mockModel.deleteMany.mockResolvedValue(mockResult);
@@ -221,7 +216,7 @@ describe('SourceMapService', () => {
 
       expect(result).toBe(5);
       expect(mockModel.deleteMany).toHaveBeenCalledWith({
-        expiresAt: { $lt: expect.any(Date) }
+        expiresAt: { $lt: expect.any(Date) },
       });
     });
   });
@@ -234,13 +229,13 @@ describe('SourceMapService', () => {
           size: [{ totalSize: 1024 }],
           versions: [
             { _id: '1.0.0', count: 5 },
-            { _id: '1.1.0', count: 5 }
+            { _id: '1.1.0', count: 5 },
           ],
           status: [
             { _id: 'active', count: 8 },
-            { _id: 'expired', count: 2 }
-          ]
-        }
+            { _id: 'expired', count: 2 },
+          ],
+        },
       ];
 
       mockModel.aggregate.mockResolvedValue(mockAggregationResult);

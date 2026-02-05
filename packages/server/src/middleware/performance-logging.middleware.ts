@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { Logger } from '@nestjs/common';
 
@@ -23,9 +23,9 @@ export class LoggerMiddleware implements NestMiddleware {
 
     // Override end method to add response time logging
     const originalEnd = res.end;
-    res.end = (chunk?: any, encoding?: any) => {
+    res.end = function (chunk?: any, encoding?: any) {
       const responseTime = Date.now() - startTime;
-      const { statusCode } = res;
+      const { statusCode } = this;
 
       // Log response with performance metrics
       this.logger.log(
@@ -44,7 +44,7 @@ export class LoggerMiddleware implements NestMiddleware {
         );
       }
 
-      originalEnd.call(res, chunk, encoding);
+      return originalEnd.call(this, chunk, encoding);
     };
 
     next();
