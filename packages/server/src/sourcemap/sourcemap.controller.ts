@@ -40,7 +40,10 @@ export class SourceMapController {
   constructor(private readonly sourceMapService: SourceMapService) {}
 
   /**
-   * Upload SourceMap files
+   * 上传 SourceMap：
+   * - 校验 DTO（ValidationPipe）后，将请求体映射为内部 SourceMapInfo 结构。
+   * - 调用 service.create 统一处理版本去重及存储。
+   * - 日志记录成功与失败便于排查。
    */
   @Post()
   @UsePipes(new ValidationPipe({ transform: true }))
@@ -75,7 +78,8 @@ export class SourceMapController {
   }
 
   /**
-   * Get SourceMaps by project ID (with optional version filtering)
+   * 根据项目 ID（可选版本）分页查询 SourceMap。
+   * 会直接透出分页元信息，并在查不到数据时抛出 404，提示调用方无对应版本。
    */
   @Get(':projectId')
   async getByProject(
@@ -129,7 +133,8 @@ export class SourceMapController {
   }
 
   /**
-   * Get specific SourceMap by filename
+   * 根据项目 + 文件名（可选版本）查询单个 SourceMap。
+   * 主要用于调试定位具体 SourceMap 是否存在。
    */
   @Get(':projectId/:filename')
   async getByFile(
@@ -175,7 +180,7 @@ export class SourceMapController {
   }
 
   /**
-   * Query SourceMap by project and version (specific endpoint from task 8)
+   * 更明确的 project + version 查询端点（无分页），适合一次性拉取全量数据。
    */
   @Get(':projectId/:version')
   async getByProjectAndVersion(
@@ -214,7 +219,7 @@ export class SourceMapController {
   }
 
   /**
-   * Clean up expired SourceMaps (admin only)
+   * 清理所有已过期 SourceMap。通常由后台任务或管理端触发。
    */
   @Delete('cleanup')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -228,7 +233,9 @@ export class SourceMapController {
   }
 
   /**
-   * Advanced search with filters and sorting
+   * 高级搜索端点：支持关键字搜索、过期状态过滤、内容展示等。
+   *
+   * （注意：当前实现为示例，调用 service.findByProjectAndVersion 并未根据 filter 过滤，后续可继续增强。）
    */
   @Get('search')
   async advancedSearch(@Query() query: AdvancedQueryDto & PaginationQueryDto) {
@@ -298,7 +305,7 @@ export class SourceMapController {
   }
 
   /**
-   * Get distinct versions for a project
+   * 获取项目的版本列表与数量，帮助前端做版本选择器。
    */
   @Get(':projectId/versions')
   async getProjectVersions(@Param('projectId') projectId: string) {
@@ -316,7 +323,7 @@ export class SourceMapController {
   }
 
   /**
-   * Bulk operations
+   * 批量操作，目前只支持 delete，可扩展其它 operation。
    */
   @Post('bulk')
   @HttpCode(HttpStatus.OK)
@@ -339,7 +346,7 @@ export class SourceMapController {
   }
 
   /**
-   * Health check endpoint for SourceMap service
+   * 健康检查：调用 service.getHealth 并附带请求耗时，用于仪表盘展示。
    */
   @Get('health')
   async health(@Headers('X-Request-ID') requestId?: string) {

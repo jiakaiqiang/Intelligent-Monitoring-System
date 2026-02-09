@@ -2,6 +2,9 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 
+/**
+ * RateLimiterMiddleware：为绝大多数 API 添加基础限流能力，防止爆破。
+ */
 @Injectable()
 export class RateLimiterMiddleware implements NestMiddleware {
   private readonly limiter: ReturnType<typeof rateLimit>;
@@ -13,7 +16,7 @@ export class RateLimiterMiddleware implements NestMiddleware {
       message: {
         success: false,
         message: 'Too many requests from this IP, please try again later.',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       },
       standardHeaders: true,
       legacyHeaders: false,

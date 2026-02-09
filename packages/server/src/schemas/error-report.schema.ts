@@ -1,15 +1,21 @@
 import { Document } from 'mongoose';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 
+/**
+ * ErrorReportEntity：存储采集到的错误上报。
+ *
+ * 与 SourceMap 形成弱关联（sourceMapId），方便后续进行堆栈映射或 AI 分析。
+ */
+
 export interface ErrorReportInfo {
-  projectId: string;          // ties to SourceMap and other project data
-  service: string;            // micro‑service / module name
-  environment: string;        // dev / staging / prod
-  timestamp: Date;            // when the exception occured
+  projectId: string; // ties to SourceMap and other project data
+  service: string; // micro‑service / module name
+  environment: string; // dev / staging / prod
+  timestamp: Date; // when the exception occured
   severity: 'low' | 'medium' | 'high' | 'critical';
-  message: string;            // error message (localized)
-  stackTrace: string;         // raw stack trace string
-  sourceMapId?: string;       // optional reference to a SourceMapDocument
+  message: string; // error message (localized)
+  stackTrace: string; // raw stack trace string
+  sourceMapId?: string; // optional reference to a SourceMapDocument
   metadata?: Record<string, string>; // custom tags (userId, requestId, etc.)
 }
 
@@ -29,7 +35,7 @@ export class ErrorReportEntity {
   @Prop({ required: true, index: true })
   timestamp: Date;
 
-  @Prop({ required: true, enum: ['low','medium','high','critical'] })
+  @Prop({ required: true, enum: ['low', 'medium', 'high', 'critical'] })
   severity: string;
 
   @Prop({ required: true })

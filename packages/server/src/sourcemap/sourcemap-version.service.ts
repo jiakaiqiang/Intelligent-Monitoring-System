@@ -6,6 +6,11 @@ import { SourceMapEntity, SourceMapDocument } from '../schemas/sourcemap.schema'
 import { SourceMapInfo } from '../schemas/sourcemap.schema';
 import type { Cache } from 'cache-manager';
 
+/**
+ * SourceMapVersionService 专注于版本级别操作（新建、比较、清理等）。
+ *
+ * 与 SourceMapService 的区别：这里处理的是“版本”这条抽象线，而不是单个文件。
+ */
 @Injectable()
 export class SourceMapVersionService {
   constructor(
@@ -16,7 +21,9 @@ export class SourceMapVersionService {
   ) {}
 
   /**
-   * 获取项目所有版本信息
+   * 获取项目所有版本信息：
+   * - 通过 Mongo 聚合 pipeline 计算 fileCount/totalSize。
+   * - 结果按上传时间倒序排序，便于前端展示最近版本。
    */
   async getAllVersions(projectId: string): Promise<any[]> {
     const pipeline = [
@@ -51,7 +58,11 @@ export class SourceMapVersionService {
   }
 
   /**
-   * 创建新版本
+   * 创建新版本：
+   * 1. 先检查 version 是否重复。
+   * 2. 针对每个 SourceMapInfo 写入 Mongo 文档（自动设定过期时间）。
+   * 3. 如果传入 parentVersion，则将其它旧版本的 expiresAt 缩短至 7 天，类似“旧版本回收期”。
+   * 4. 最后清理相关缓存键，保证最新数据可见。
    */
   async createVersion(
     projectId: string,
@@ -110,7 +121,9 @@ export class SourceMapVersionService {
   }
 
   /**
-   * 回滚到指定版本
+   * 回滚：
+   * - 读取 targetVersion 的所有 SourceMap；若不存在抛 404。
+   * - 将其克隆成新的版本（newVersion），保留 parentVersion 以方便溯源。
    */
   async rollbackToVersion(
     projectId: string,
@@ -138,7 +151,9 @@ export class SourceMapVersionService {
   }
 
   /**
-   * 比较两个版本
+   * 比较两个版本：
+   * - 找出共同文件、增加/删除文件、内容修改（基于 content length 差异）。
+   * - 结果对象可直接用于 UI diff 展示。
    */
   async compareVersions(projectId: string, version1: string, version2: string): Promise<any> {
     const [maps1, maps2] = await Promise.all([
@@ -188,7 +203,8 @@ export class SourceMapVersionService {
   }
 
   /**
-   * 清理过期版本
+   * 清理过期版本：删除所有 expiresAt < now 的文档并返回统计数据。
+   * totalSize 为所有被删 SourceMap 的内容长度之和，可用于监控。
    */
   async cleanupExpiredVersions(projectId: string): Promise<{
     cleanedVersions: string[];
@@ -230,7 +246,8 @@ export class SourceMapVersionService {
   }
 
   /**
-   * 获取版本历史
+   * 获取版本历史：返回最近 limit 条 version 记录及其上传时间。
+   * 会对版本去重并统计 fileCount，方便渲染时间线。
    */
   async getVersionHistory(projectId: string, limit: number = 50): Promise<any[]> {
     // const cacheKey = `sourcemap:history:${projectId}:${limit}`;
@@ -274,7 +291,10 @@ export class SourceMapVersionService {
   }
 
   /**
-   * 自动版本检测和建议
+   * 自动建议下一个版本号：
+   * - 若 24 小时内有其它版本上传，则建议递增 patch。
+   * - 若检测到同一版本存在重复文件（count > 1），也建议升级。
+   * - 否则返回 currentVersion 并说明无需更新。
    */
   async suggestNewVersion(
     projectId: string,

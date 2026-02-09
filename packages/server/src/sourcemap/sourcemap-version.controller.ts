@@ -12,7 +12,7 @@ import {
   NotFoundException,
   BadRequestException,
   UsePipes,
-  ValidationPipe
+  ValidationPipe,
 } from '@nestjs/common';
 import { SourceMapVersionService } from './sourcemap-version.service';
 import {
@@ -20,23 +20,23 @@ import {
   CompareVersionsDto,
   RollbackDto,
   CleanupDto,
-  SuggestVersionDto
+  SuggestVersionDto,
 } from './dto/version.dto';
 
+/**
+ * 版本相关 REST 控制器：
+ * - 提供版本 CRUD、对比、回滚、建议、批量删除等接口。
+ * - 所有接口均要求 Path Param projectId，未携带时统一返回 400。
+ */
 @Controller('api/sourcemaps/:projectId/versions')
 export class SourceMapVersionController {
-  constructor(
-    private readonly versionService: SourceMapVersionService
-  ) {}
+  constructor(private readonly versionService: SourceMapVersionService) {}
 
   /**
    * 获取项目所有版本信息
    */
   @Get()
-  async getAllVersions(
-    @Param('projectId') projectId: string,
-    @Query('limit') limit?: number
-  ) {
+  async getAllVersions(@Param('projectId') projectId: string, @Query('limit') limit?: number) {
     if (!projectId) {
       throw new BadRequestException('Project ID is required');
     }
@@ -46,7 +46,7 @@ export class SourceMapVersionController {
     return {
       success: true,
       data: limit ? versions.slice(0, parseInt(limit.toString())) : versions,
-      total: versions.length
+      total: versions.length,
     };
   }
 
@@ -62,14 +62,11 @@ export class SourceMapVersionController {
       throw new BadRequestException('Project ID is required');
     }
 
-    const history = await this.versionService.getVersionHistory(
-      projectId,
-      parseInt(limit)
-    );
+    const history = await this.versionService.getVersionHistory(projectId, parseInt(limit));
 
     return {
       success: true,
-      data: history
+      data: history,
     };
   }
 
@@ -78,10 +75,7 @@ export class SourceMapVersionController {
    */
   @Post()
   @UsePipes(new ValidationPipe({ transform: true }))
-  async createVersion(
-    @Param('projectId') projectId: string,
-    @Body() body: CreateVersionDto
-  ) {
+  async createVersion(@Param('projectId') projectId: string, @Body() body: CreateVersionDto) {
     if (!projectId) {
       throw new BadRequestException('Project ID is required');
     }
@@ -99,12 +93,12 @@ export class SourceMapVersionController {
       return {
         success: true,
         message: `Successfully created version ${version} with ${documents.length} files`,
-        data: documents.map(doc => ({
+        data: documents.map((doc) => ({
           id: doc.id,
           filename: doc.filename,
           version: doc.version,
-          uploadedAt: doc.uploadedAt
-        }))
+          uploadedAt: doc.uploadedAt,
+        })),
       };
     } catch (error) {
       if (error.message.includes('already exists')) {
@@ -119,10 +113,7 @@ export class SourceMapVersionController {
    */
   @Post('rollback')
   @UsePipes(new ValidationPipe({ transform: true }))
-  async rollback(
-    @Param('projectId') projectId: string,
-    @Body() body: RollbackDto
-  ) {
+  async rollback(@Param('projectId') projectId: string, @Body() body: RollbackDto) {
     if (!projectId) {
       throw new BadRequestException('Project ID is required');
     }
@@ -139,12 +130,12 @@ export class SourceMapVersionController {
       return {
         success: true,
         message: `Successfully rolled back from ${targetVersion} to ${newVersion}`,
-        data: documents.map(doc => ({
+        data: documents.map((doc) => ({
           id: doc.id,
           filename: doc.filename,
           version: doc.version,
-          uploadedAt: doc.uploadedAt
-        }))
+          uploadedAt: doc.uploadedAt,
+        })),
       };
     } catch (error) {
       if (error.message.includes('not found')) {
@@ -159,10 +150,7 @@ export class SourceMapVersionController {
    */
   @Post('compare')
   @UsePipes(new ValidationPipe({ transform: true }))
-  async compareVersions(
-    @Param('projectId') projectId: string,
-    @Body() body: CompareVersionsDto
-  ) {
+  async compareVersions(@Param('projectId') projectId: string, @Body() body: CompareVersionsDto) {
     if (!projectId) {
       throw new BadRequestException('Project ID is required');
     }
@@ -170,15 +158,11 @@ export class SourceMapVersionController {
     const { version1, version2 } = body;
 
     try {
-      const comparison = await this.versionService.compareVersions(
-        projectId,
-        version1,
-        version2
-      );
+      const comparison = await this.versionService.compareVersions(projectId, version1, version2);
 
       return {
         success: true,
-        data: comparison
+        data: comparison,
       };
     } catch (error) {
       throw new BadRequestException(`Failed to compare versions: ${error.message}`);
@@ -200,14 +184,11 @@ export class SourceMapVersionController {
     const { currentVersion } = query;
 
     try {
-      const suggestion = await this.versionService.suggestNewVersion(
-        projectId,
-        currentVersion
-      );
+      const suggestion = await this.versionService.suggestNewVersion(projectId, currentVersion);
 
       return {
         success: true,
-        data: suggestion
+        data: suggestion,
       };
     } catch (error) {
       if (error.message.includes('not found')) {
@@ -222,10 +203,7 @@ export class SourceMapVersionController {
    */
   @Delete('cleanup')
   @UsePipes(new ValidationPipe({ transform: true }))
-  async cleanupExpired(
-    @Param('projectId') projectId: string,
-    @Body() body: CleanupDto
-  ) {
+  async cleanupExpired(@Param('projectId') projectId: string, @Body() body: CleanupDto) {
     if (!projectId) {
       throw new BadRequestException('Project ID is required');
     }
@@ -242,8 +220,8 @@ export class SourceMapVersionController {
           data: {
             preview: info,
             estimatedSpaceSaved: info.totalSize,
-            versionsToClean: info.cleanedVersions.length
-          }
+            versionsToClean: info.cleanedVersions.length,
+          },
         };
       }
 
@@ -253,7 +231,7 @@ export class SourceMapVersionController {
       return {
         success: true,
         message: `Cleaned up ${result.cleanedVersions.length} versions`,
-        data: result
+        data: result,
       };
     } catch (error) {
       throw new BadRequestException(`Cleanup failed: ${error.message}`);
@@ -278,7 +256,7 @@ export class SourceMapVersionController {
     if (!confirm) {
       return {
         success: false,
-        message: 'Please set confirm=true to proceed with deletion'
+        message: 'Please set confirm=true to proceed with deletion',
       };
     }
 
@@ -291,7 +269,7 @@ export class SourceMapVersionController {
     return {
       success: true,
       message: `Batch cleanup completed`,
-      data: result
+      data: result,
     };
   }
 
@@ -309,16 +287,16 @@ export class SourceMapVersionController {
 
     // 获取版本信息
     const versions = await this.versionService.getAllVersions(projectId);
-    const versionInfo = versions.find(v => v.version === version);
+    const versionInfo = versions.find((v) => v.version === version);
 
     if (!versionInfo) {
       throw new NotFoundException(`Version ${version} not found for project ${projectId}`);
     }
 
     // 获取版本中所有文件
-    const files = await this.versionService.getAllVersions(projectId).then(versions =>
-      versions.filter(v => v.version === version)
-    );
+    const files = await this.versionService
+      .getAllVersions(projectId)
+      .then((versions) => versions.filter((v) => v.version === version));
 
     // 计算实际文件大小
     const totalSize = files.reduce((sum, file) => sum + (file.content?.length || 0), 0);
@@ -331,8 +309,8 @@ export class SourceMapVersionController {
         fileCount: files.length,
         totalSize,
         expiresAt: versionInfo.expiresAt,
-        files
-      }
+        files,
+      },
     };
   }
 }

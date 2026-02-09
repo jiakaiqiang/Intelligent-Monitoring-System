@@ -2,6 +2,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsNumber, IsOptional, IsArray, IsBoolean, IsObject } from 'class-validator';
 import { Transform } from 'class-transformer';
 
+/**
+ * DTO 分为三部分：
+ * 1. CreateSourceMapDto —— 接收 SDK 上传的数据，包含项目信息与 base64 内容。
+ * 2. Query/Pagination DTO —— 控制列表查询参数。
+ * 3. Response DTO —— 用于 Swagger 文档和类型提示，保障接口契约清晰。
+ */
+
 export class CreateSourceMapDto {
   @ApiProperty({ description: 'Project name', example: 'my-project' })
   @IsString()
