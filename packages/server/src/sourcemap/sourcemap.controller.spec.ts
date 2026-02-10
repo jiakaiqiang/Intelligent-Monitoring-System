@@ -1,42 +1,31 @@
 // SourceMapController 测试：mock service 以验证各 REST 端点的行为与异常。
-import { Test, TestingModule } from '@nestjs/testing';
+import 'reflect-metadata';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SourceMapController } from './sourcemap.controller';
 import { SourceMapService } from './sourcemap.service';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 const mockSourceMapService = {
-  create: jest.fn(),
-  findByProjectAndVersion: jest.fn(),
-  findOne: jest.fn(),
-  getByProjectAndVersion: jest.fn(),
-  cleanupExpired: jest.fn(),
-  advancedSearch: jest.fn(),
-  getProjectVersions: jest.fn(),
-  bulkOperations: jest.fn(),
-  getHealth: jest.fn(),
+  create: vi.fn(),
+  findByProjectAndVersion: vi.fn(),
+  findOne: vi.fn(),
+  getByProjectAndVersion: vi.fn(),
+  cleanupExpired: vi.fn(),
+  advancedSearch: vi.fn(),
+  getProjectVersions: vi.fn(),
+  bulkOperations: vi.fn(),
+  getHealth: vi.fn(),
 };
 
 describe('SourceMapController', () => {
   let controller: SourceMapController;
-  let service: SourceMapService;
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [SourceMapController],
-      providers: [
-        {
-          provide: SourceMapService,
-          useValue: mockSourceMapService,
-        },
-      ],
-    }).compile();
-
-    controller = module.get<SourceMapController>(SourceMapController);
-    service = module.get<SourceMapService>(SourceMapService);
+    controller = new SourceMapController(mockSourceMapService as unknown as SourceMapService);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('upload', () => {
@@ -63,7 +52,7 @@ describe('SourceMapController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data.filename).toBe('app.js.map');
-      expect(service.create).toHaveBeenCalledWith('test-project', [
+      expect(mockSourceMapService.create).toHaveBeenCalledWith('test-project', [
         {
           filename: 'app.js.map',
           content: 'test-content',
@@ -103,7 +92,12 @@ describe('SourceMapController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveLength(1);
-      expect(service.findByProjectAndVersion).toHaveBeenCalledWith('test-project', '1.0.0', 1, 10);
+      expect(mockSourceMapService.findByProjectAndVersion).toHaveBeenCalledWith(
+        'test-project',
+        '1.0.0',
+        1,
+        10
+      );
     });
 
     it('should throw error when no source maps found', async () => {
@@ -137,7 +131,10 @@ describe('SourceMapController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveLength(1);
-      expect(service.getByProjectAndVersion).toHaveBeenCalledWith('test-project', '1.0.0');
+      expect(mockSourceMapService.getByProjectAndVersion).toHaveBeenCalledWith(
+        'test-project',
+        '1.0.0'
+      );
     });
   });
 
@@ -149,7 +146,7 @@ describe('SourceMapController', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toContain('5');
-      expect(service.cleanupExpired).toHaveBeenCalled();
+      expect(mockSourceMapService.cleanupExpired).toHaveBeenCalled();
     });
   });
 
@@ -172,7 +169,7 @@ describe('SourceMapController', () => {
 
       expect(result.success).toBe(true);
       expect(result.health.status).toBe('healthy');
-      expect(service.getHealth).toHaveBeenCalled();
+      expect(mockSourceMapService.getHealth).toHaveBeenCalled();
     });
   });
 });

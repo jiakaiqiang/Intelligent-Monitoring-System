@@ -293,13 +293,8 @@ export class SourceMapVersionController {
       throw new NotFoundException(`Version ${version} not found for project ${projectId}`);
     }
 
-    // 获取版本中所有文件
-    const files = await this.versionService
-      .getAllVersions(projectId)
-      .then((versions) => versions.filter((v) => v.version === version));
-
-    // 计算实际文件大小
-    const totalSize = files.reduce((sum, file) => sum + (file.content?.length || 0), 0);
+    const files = await this.versionService.getFilesForVersion(projectId, version);
+    const totalSize = files.reduce((sum, file) => sum + file.content.length, 0);
 
     return {
       success: true,
@@ -309,7 +304,13 @@ export class SourceMapVersionController {
         fileCount: files.length,
         totalSize,
         expiresAt: versionInfo.expiresAt,
-        files,
+        files: files.map((file) => ({
+          id: file.id,
+          filename: file.filename,
+          uploadedAt: file.uploadedAt,
+          expiresAt: file.expiresAt,
+          size: file.content.length,
+        })),
       },
     };
   }

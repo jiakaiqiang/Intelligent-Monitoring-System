@@ -91,12 +91,11 @@
             height: '1.6em',
             background: 'rgba(255, 77, 79, 0.1)',
             borderLeft: '3px solid #ff4d4f',
-            pointerEvents: 'none'
-          }"
-          :style="{
-            top: `${(lineNumber - 1) * 1.6 + 10}px`,
+            pointerEvents: 'none',
+             top: `${(lineNumber - 1) * 1.6 + 10}px`,
             marginLeft: '70px'
           }"
+         
         ></div>
       </div>
     </div>
@@ -135,6 +134,7 @@
 </template>
 
 <script setup lang="ts">
+import {computed} from 'vue'
 interface SourceFile {
   fileName: string;
   content: string;

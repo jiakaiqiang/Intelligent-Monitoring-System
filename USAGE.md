@@ -79,20 +79,24 @@ const monitor = new Monitor({
 
 ### SDK 配置
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| projectId | string | 是 | 项目 ID |
-| reportUrl | string | 是 | 上报地址 |
-| maxErrors | number | 否 | 最大错误数，默认 10 |
-| sampleRate | number | 否 | 采样率 0-1，默认 1 |
-| plugins | PluginManager | 否 | 插件管理器 |
+| 参数       | 类型          | 必填 | 说明                |
+| ---------- | ------------- | ---- | ------------------- |
+| projectId  | string        | 是   | 项目 ID             |
+| reportUrl  | string        | 是   | 上报地址            |
+| maxErrors  | number        | 否   | 最大错误数，默认 10 |
+| sampleRate | number        | 否   | 采样率 0-1，默认 1  |
+| plugins    | PluginManager | 否   | 插件管理器          |
 
 ### 服务端配置
 
 创建 `.env` 文件:
 
 ```bash
-MONGO_URI=mongodb://localhost:27017
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=root
+MYSQL_DB=monitor
 REDIS_HOST=localhost
 REDIS_PORT=6379
 ANTHROPIC_API_KEY=your_api_key

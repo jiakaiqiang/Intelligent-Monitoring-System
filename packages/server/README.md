@@ -11,8 +11,8 @@ packages/server/
 │   │   ├── report.controller.ts
 │   │   ├── report.service.ts
 │   │   ├── report.module.ts
-│   │   └── schemas/
-│   │       └── report.schema.ts
+│   │   └── entities/
+│   │       └── report.entity.ts
 │   ├── ai/                     # AI 分析模块
 │   │   ├── ai.service.ts
 │   │   └── ai.module.ts
@@ -32,12 +32,14 @@ packages/server/
 负责接收、存储和查询前端上报的异常数据。
 
 **功能：**
+
 - 接收前端 SDK 上报的异常数据
-- 存储到 MongoDB
+- 使用 TypeORM 将数据写入 MySQL
 - 提供查询接口
 - 触发 AI 分析任务
 
 **数据模型：**
+
 ```typescript
 {
   projectId: string;           // 项目 ID
@@ -72,11 +74,13 @@ packages/server/
 使用 Claude API 对异常进行智能分析。
 
 **功能：**
+
 - 从队列获取待分析任务
 - 调用 Claude API 分析错误
 - 更新分析结果到数据库
 
 **工作流程：**
+
 1. Report 创建时，如果有错误，推送到 Redis 队列
 2. AI Worker 定时从队列获取任务
 3. 调用 Claude API 分析
@@ -87,6 +91,7 @@ packages/server/
 基于 Redis 的消息队列服务。
 
 **功能：**
+
 - 推送任务到队列
 - 从队列获取任务
 - 查询队列长度
@@ -98,6 +103,7 @@ packages/server/
 **接口：** `POST /api/report`
 
 **请求体：**
+
 ```json
 {
   "projectId": "demo-project",
@@ -129,6 +135,7 @@ packages/server/
 ```
 
 **响应：**
+
 ```json
 {
   "_id": "65a1b2c3d4e5f6g7h8i9j0k1",
@@ -146,9 +153,11 @@ packages/server/
 **接口：** `GET /api/reports/:projectId`
 
 **参数：**
+
 - `projectId`: 项目 ID
 
 **响应：**
+
 ```json
 {
   "data": [
@@ -172,7 +181,11 @@ packages/server/
 
 ```bash
 PORT=3000
-MONGO_URI=mongodb://localhost:27017/monitor
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=root
+MYSQL_DB=monitor
 REDIS_HOST=localhost
 REDIS_PORT=6379
 ANTHROPIC_API_KEY=your_api_key_here
@@ -190,8 +203,13 @@ pnpm install
 ### 1. 启动数据库
 
 ```bash
-# MongoDB
-docker run -d -p 27017:27017 --name mongodb mongo:latest
+# MySQL
+docker run -d \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=monitor \
+  -p 3306:3306 \
+  --name mysql \
+  mysql:8
 
 # Redis
 docker run -d -p 6379:6379 --name redis redis:latest
@@ -214,27 +232,31 @@ pnpm start
 
 - **框架：** NestJS 10
 - **语言：** TypeScript 5
-- **数据库：** MongoDB (Mongoose)
+- **数据库：** MySQL 8 + TypeORM
 - **缓存/队列：** Redis
 - **AI：** Claude API (Anthropic)
 
 ## 核心特性
 
 ### 1. 模块化架构
+
 - 采用 NestJS 模块化设计
 - 依赖注入，易于测试和维护
 - 清晰的职责分离
 
 ### 2. 异步处理
+
 - 使用 Redis 队列异步处理 AI 分析
 - 避免阻塞主请求流程
 - 提高系统吞吐量
 
 ### 3. 数据库优化
-- MongoDB 索引优化 (projectId + createdAt)
+
+- MySQL 索引优化 (projectId + createdAt)
 - 支持高效查询和排序
 
 ### 4. AI 智能分析
+
 - 集成 Claude 3.5 Sonnet
 - 自动分析错误原因
 - 提供解决方案建议
@@ -243,7 +265,7 @@ pnpm start
 
 ### 添加新的分析维度
 
-在 `report.schema.ts` 中扩展数据模型：
+在 `report/entities/report.entity.ts` 中扩展数据模型：
 
 ```typescript
 @Prop({ type: Object })
@@ -285,6 +307,7 @@ async analyzeError(errors: any[]) {
 ## 监控和日志
 
 建议集成：
+
 - **日志：** Winston / Pino
 - **监控：** Prometheus + Grafana
 - **追踪：** OpenTelemetry

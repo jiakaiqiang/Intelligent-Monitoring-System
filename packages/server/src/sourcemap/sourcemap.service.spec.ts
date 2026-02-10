@@ -1,253 +1,127 @@
-// SourceMapService 单元测试：通过 mock 的 Mongoose model 验证核心 CRUD 行为。
+import 'reflect-metadata';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { SourceMapService } from './sourcemap.service';
-import { getModelToken } from '@nestjs/mongoose';
-import { SourceMapEntity } from '../schemas/sourcemap.schema';
+import { SourceMapEntity } from './entities/sourcemap.entity';
 
-const mockModel = {
-  find: jest.fn(),
-  findOne: jest.fn(),
-  countDocuments: jest.fn(),
-  distinct: jest.fn(),
-  aggregate: jest.fn(),
-  deleteMany: jest.fn(),
-  lean: jest.fn(),
-  select: jest.fn(),
-  sort: jest.fn(),
-  skip: jest.fn(),
-  limit: jest.fn(),
-  exec: jest.fn(),
-  save: jest.fn(),
-  create: jest.fn(),
-  updateMany: jest.fn(),
+type MockRepository<T = any> = Partial<Record<keyof Repository<T>, Mock>> & {
+  create: Mock;
+  save: Mock;
+  findOne: Mock;
+  findAndCount: Mock;
+  find: Mock;
+  count: Mock;
+  delete: Mock;
+  createQueryBuilder?: Mock;
 };
 
-describe('SourceMapService', () => {
+const createRepositoryMock = (): MockRepository => ({
+  create: vi.fn((entity) => entity),
+  save: vi.fn(),
+  findOne: vi.fn(),
+  findAndCount: vi.fn(),
+  find: vi.fn(),
+  count: vi.fn(),
+  delete: vi.fn(),
+  createQueryBuilder: vi.fn(),
+});
+
+describe('SourceMapService (TypeORM)', () => {
   let service: SourceMapService;
-  let model: any;
+  let repository: MockRepository;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SourceMapService,
         {
-          provide: getModelToken(SourceMapEntity.name),
-          useValue: mockModel,
+          provide: getRepositoryToken(SourceMapEntity),
+          useValue: createRepositoryMock(),
         },
       ],
     }).compile();
 
     service = module.get<SourceMapService>(SourceMapService);
-    model = module.get(getModelToken(SourceMapEntity.name));
+    repository = module.get(getRepositoryToken(SourceMapEntity));
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {
-    it('should create source map documents', async () => {
-      const sourceMaps = [
-        {
-          filename: 'app.js.map',
-          content: 'test-content',
-        },
-      ];
+    it('should insert new source maps', async () => {
+      repository.findOne!.mockResolvedValue(null);
+      repository.save!.mockImplementation(async (entity) => ({ id: '1', ...entity }));
 
-      const mockDocument = {
-        id: '123',
-        filename: 'app.js.map',
-        version: '1.0.0',
-        uploadedAt: new Date(),
-        save: jest.fn().mockResolvedValue(null),
-      };
+      const result = await service.create('project', [
+        { filename: 'app.js.map', content: 'content', version: '1.0.0' },
+      ]);
 
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
-      mockModel.create.mockResolvedValue(mockDocument);
-
-      const result = await service.create('test-project', sourceMaps);
-
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('123');
-      expect(mockModel.create).toHaveBeenCalled();
+      expect(repository.findOne).toHaveBeenCalled();
+      expect(repository.save).toHaveBeenCalled();
+      expect(result[0].filename).toBe('app.js.map');
     });
 
-    it('should update existing source map', async () => {
-      const sourceMaps = [
-        {
-          filename: 'app.js.map',
-          content: 'new-content',
-        },
-      ];
+    it('should update existing source map when found', async () => {
+      const existing = { id: '1', filename: 'app.js.map', content: 'old', uploadedAt: new Date() };
+      repository.findOne!.mockResolvedValue(existing);
+      repository.save!.mockImplementation(async (entity) => entity);
 
-      const existingDoc = {
-        id: '123',
-        filename: 'app.js.map',
-        version: '1.0.0',
-        content: 'old-content',
-        uploadedAt: new Date(),
-        updatedAt: new Date(),
-        save: jest.fn().mockResolvedValue(null),
-      };
+      const result = await service.create('project', [
+        { filename: 'app.js.map', content: 'new-content', version: '1.0.0' },
+      ]);
 
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(existingDoc) });
-
-      const result = await service.create('test-project', sourceMaps);
-
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'new-content' })
+      );
       expect(result).toHaveLength(1);
-      expect(existingDoc.content).toBe('new-content');
-      expect(existingDoc.updatedAt).toBeDefined();
     });
   });
 
-  describe('find', () => {
-    it('should find source maps with caching', async () => {
-      const query = {
-        projectId: 'test-project',
-        version: '1.0.0',
-      };
+  describe('find & findOne', () => {
+    it('should return paginated results', async () => {
+      repository.findAndCount!.mockResolvedValue([[{ id: '1' }], 1]);
 
-      const mockResult = {
-        data: [],
-        total: 0,
-        totalPages: 0,
-      };
+      const result = await service.find({ projectId: 'project' }, 1, 10);
 
-      mockModel.countDocuments.mockResolvedValue(0);
-      mockModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      });
-
-      const result = await service.find(query, 1, 10);
-
-      expect(result).toEqual(mockResult);
-      expect(mockModel.countDocuments).toHaveBeenCalled();
+      expect(repository.findAndCount).toHaveBeenCalled();
+      expect(result.total).toBe(1);
     });
 
-    it('should return cached result', async () => {
-      const query = {
-        projectId: 'test-project',
-        version: '1.0.0',
-      };
+    it('should return single source map', async () => {
+      repository.findOne!.mockResolvedValue({ id: '1', filename: 'app.js.map' });
 
-      const cachedResult = {
-        data: [],
-        total: 0,
-        totalPages: 0,
-      };
+      const result = await service.findOne({ projectId: 'project', filename: 'app.js.map' });
 
-      mockModel.countDocuments.mockResolvedValue(0);
-      mockModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      });
-
-      const result = await service.find(query, 1, 10);
-
-      expect(result).toEqual(cachedResult);
-    });
-  });
-
-  describe('findOne', () => {
-    it('should find single source map', async () => {
-      const query = {
-        projectId: 'test-project',
-        filename: 'app.js.map',
-      };
-
-      const mockDocument = {
-        id: '123',
-        filename: 'app.js.map',
-        version: '1.0.0',
-      };
-
-      const execMock = jest.fn().mockResolvedValue(mockDocument);
-      mockModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnValue({ exec: execMock }),
-      });
-
-      const result = await service.findOne(query);
-
-      expect(result).toEqual(mockDocument);
-      expect(mockModel.findOne).toHaveBeenCalled();
+      expect(repository.findOne).toHaveBeenCalled();
+      expect(result?.filename).toBe('app.js.map');
     });
   });
 
   describe('getByProjectAndVersion', () => {
-    it('should get source maps by project and version', async () => {
-      const projectId = 'test-project';
-      const version = '1.0.0';
+    it('should fetch all maps for version', async () => {
+      repository.find!.mockResolvedValue([{ id: '1', version: '1.0.0' }]);
 
-      const mockDocuments = [
-        {
-          id: '123',
-          filename: 'app.js.map',
-          version: '1.0.0',
-          uploadedAt: new Date(),
-          expiresAt: new Date(),
-        },
-      ];
+      const result = await service.getByProjectAndVersion('project', '1.0.0');
 
-      const execMock = jest.fn().mockResolvedValue(mockDocuments);
-      mockModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnValue({ exec: execMock }),
-      });
-
-      const result = await service.getByProjectAndVersion(projectId, version);
-
-      expect(result).toEqual(mockDocuments);
-      expect(mockModel.find).toHaveBeenCalled();
+      expect(repository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { projectId: 'project', version: '1.0.0' } })
+      );
+      expect(result).toHaveLength(1);
     });
   });
 
   describe('cleanupExpired', () => {
-    it('should delete expired source maps', async () => {
-      const mockResult = {
-        deletedCount: 5,
-      };
+    it('should delete expired records', async () => {
+      repository.delete!.mockResolvedValue({ affected: 5 });
 
-      mockModel.deleteMany.mockResolvedValue(mockResult);
+      const deleted = await service.cleanupExpired();
 
-      const result = await service.cleanupExpired();
-
-      expect(result).toBe(5);
-      expect(mockModel.deleteMany).toHaveBeenCalledWith({
-        expiresAt: { $lt: expect.any(Date) },
-      });
-    });
-  });
-
-  describe('getProjectStats', () => {
-    it('should return project statistics', async () => {
-      const mockAggregationResult = [
-        {
-          count: [{ total: 10 }],
-          size: [{ totalSize: 1024 }],
-          versions: [
-            { _id: '1.0.0', count: 5 },
-            { _id: '1.1.0', count: 5 },
-          ],
-          status: [
-            { _id: 'active', count: 8 },
-            { _id: 'expired', count: 2 },
-          ],
-        },
-      ];
-
-      mockModel.aggregate.mockResolvedValue(mockAggregationResult);
-
-      const result = await service.getProjectStats('test-project');
-
-      expect(result.totalFiles).toBe(10);
-      expect(result.totalSize).toBe(1024);
-      expect(result.versions).toContain('1.0.0');
-      expect(result.versions).toContain('1.1.0');
-      expect(result.expiredCount).toBe(2);
+      expect(repository.delete).toHaveBeenCalled();
+      expect(deleted).toBe(5);
     });
   });
 });

@@ -11,7 +11,9 @@
       "Bash(git push)",
       "Bash(git config:*)",
       "Bash(findstr:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

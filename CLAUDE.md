@@ -33,27 +33,30 @@
 ## 各包实用脚本
 
 ### Server (`packages/server`)
+
 - 安装依赖：`cd packages/server && pnpm install`
 - 本地启动服务（开发模式）：`pnpm dev`
 - 构建生产环境服务器：`pnpm build`
 - 运行服务器测试：`pnpm test`
 
 ### Dashboard (`packages/dashboard`)
+
 - 安装依赖：`cd packages/dashboard && pnpm install`
 - 启动 UI 开发服务器：`pnpm dev`
 - 构建生产环境 UI：`pnpm build`
 
 ### SDK (`packages/sdk`)
+
 - 安装依赖：`cd packages/sdk && pnpm install`
 - 构建 SDK 包：`pnpm build`
 
 ## 快速启动检查清单
 
 1. 安装所有依赖：`pnpm install`
-2. 启动所需服务（MongoDB、Redis）——请参阅 `packages/server/README.md` 中的 Docker 命令。
+2. 启动所需服务（MySQL、Redis）——请参阅 `packages/server/README.md` 中的 Docker 命令。
 3. 以开发模式运行完整栈：`pnpm dev`
 4. 在浏览器访问 API `http://localhost:3000`，以及仪表盘在 Vite 开发服务器打印的地址。
 
 ---
 
-*由 Claude Code 生成*。
+_由 Claude Code 生成_。

@@ -1,41 +1,33 @@
 // SourceMapVersionController 测试：覆盖版本 CRUD/回滚/批量操作等典型路径。
-import { Test, TestingModule } from '@nestjs/testing';
+import 'reflect-metadata';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SourceMapVersionController } from './sourcemap-version.controller';
 import { SourceMapVersionService } from './sourcemap-version.service';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 const mockVersionService = {
-  getAllVersions: jest.fn(),
-  getVersionHistory: jest.fn(),
-  createVersion: jest.fn(),
-  rollbackToVersion: jest.fn(),
-  compareVersions: jest.fn(),
-  cleanupExpiredVersions: jest.fn(),
-  suggestNewVersion: jest.fn(),
-  batchVersionCleanup: jest.fn(),
+  getAllVersions: vi.fn(),
+  getVersionHistory: vi.fn(),
+  createVersion: vi.fn(),
+  rollbackToVersion: vi.fn(),
+  compareVersions: vi.fn(),
+  cleanupExpiredVersions: vi.fn(),
+  suggestNewVersion: vi.fn(),
+  batchVersionCleanup: vi.fn(),
+  getFilesForVersion: vi.fn(),
 };
 
 describe('SourceMapVersionController', () => {
   let controller: SourceMapVersionController;
-  let service: SourceMapVersionService;
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [SourceMapVersionController],
-      providers: [
-        {
-          provide: SourceMapVersionService,
-          useValue: mockVersionService,
-        },
-      ],
-    }).compile();
-
-    controller = module.get<SourceMapVersionController>(SourceMapVersionController);
-    service = module.get<SourceMapVersionService>(SourceMapVersionService);
+    controller = new SourceMapVersionController(
+      mockVersionService as unknown as SourceMapVersionService
+    );
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('getAllVersions', () => {
@@ -64,7 +56,7 @@ describe('SourceMapVersionController', () => {
       expect(result.success).toBe(true);
       expect(result.data).toHaveLength(2);
       expect(result.total).toBe(2);
-      expect(service.getAllVersions).toHaveBeenCalledWith('test-project');
+      expect(mockVersionService.getAllVersions).toHaveBeenCalledWith('test-project');
     });
 
     it('should handle missing project id', async () => {
@@ -102,7 +94,7 @@ describe('SourceMapVersionController', () => {
       expect(result.success).toBe(true);
       expect(result.message).toContain('1.2.0');
       expect(result.data).toHaveLength(1);
-      expect(service.createVersion).toHaveBeenCalledWith(
+      expect(mockVersionService.createVersion).toHaveBeenCalledWith(
         'test-project',
         '1.2.0',
         createDto.sourceMaps,
@@ -149,7 +141,11 @@ describe('SourceMapVersionController', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toContain('rolled back from 1.0.0');
-      expect(service.rollbackToVersion).toHaveBeenCalledWith('test-project', '1.0.0', '1.0.1');
+      expect(mockVersionService.rollbackToVersion).toHaveBeenCalledWith(
+        'test-project',
+        '1.0.0',
+        '1.0.1'
+      );
     });
 
     it('should handle target version not found', async () => {
@@ -195,7 +191,11 @@ describe('SourceMapVersionController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockComparison);
-      expect(service.compareVersions).toHaveBeenCalledWith('test-project', '1.0.0', '1.1.0');
+      expect(mockVersionService.compareVersions).toHaveBeenCalledWith(
+        'test-project',
+        '1.0.0',
+        '1.1.0'
+      );
     });
   });
 
@@ -218,7 +218,7 @@ describe('SourceMapVersionController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockSuggestion);
-      expect(service.suggestNewVersion).toHaveBeenCalledWith('test-project', '1.0.0');
+      expect(mockVersionService.suggestNewVersion).toHaveBeenCalledWith('test-project', '1.0.0');
     });
 
     it('should handle current version not found', async () => {
@@ -250,9 +250,12 @@ describe('SourceMapVersionController', () => {
 
       const result = await controller.cleanupExpired('test-project', cleanupDto);
 
+      const previewResponse = result.data as any;
       expect(result.success).toBe(true);
       expect(result.message).toContain('Preview cleanup result');
-      expect(result.data).toEqual(mockResult);
+      expect(previewResponse.preview).toEqual(mockResult);
+      expect(previewResponse.estimatedSpaceSaved).toBe(mockResult.totalSize);
+      expect(previewResponse.versionsToClean).toBe(mockResult.cleanedVersions.length);
     });
 
     it('should execute cleanup when force is true', async () => {
@@ -322,15 +325,6 @@ describe('SourceMapVersionController', () => {
 
   describe('getVersionDetails', () => {
     it('should get details for a specific version', async () => {
-      const mockFiles = [
-        {
-          filename: 'app.js.map',
-          size: 512,
-          uploadedAt: new Date(),
-          content: 'test-content',
-        },
-      ];
-
       // Mock the underlying methods
       const mockVersions = [
         {
@@ -344,22 +338,22 @@ describe('SourceMapVersionController', () => {
 
       mockVersionService.getAllVersions.mockResolvedValue(mockVersions);
 
-      // Mock the model find
-      const mockModel = {
-        find: jest.fn().mockReturnValue({
-          select: jest.fn().mockReturnValue({
-            lean: jest.fn().mockResolvedValue(mockFiles),
-          }),
-        }),
-      };
-      (service as any).sourceMapModel = mockModel;
+      mockVersionService.getFilesForVersion.mockResolvedValue([
+        {
+          id: 'file-1',
+          filename: 'app.js.map',
+          content: 'test-content',
+          uploadedAt: new Date(),
+          expiresAt: new Date(),
+        },
+      ]);
 
       const result = await controller.getVersionDetails('test-project', '1.0.0');
 
       expect(result.success).toBe(true);
       expect(result.data.version).toBe('1.0.0');
       expect(result.data.fileCount).toBe(1);
-      expect(result.data.totalSize).toBe(512);
+      expect(result.data.totalSize).toBe(12);
       expect(result.data.files).toHaveLength(1);
     });
 

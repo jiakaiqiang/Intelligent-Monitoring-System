@@ -18,7 +18,8 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { SourceMapService } from './sourcemap.service';
-import { SourceMapInfo } from '../schemas/sourcemap.schema';
+import { SourceMapInfo } from './entities/sourcemap.entity';
+import { SourceMapEntity } from './entities/sourcemap.entity';
 import {
   CreateSourceMapDto,
   QuerySourceMapDto,
@@ -248,43 +249,37 @@ export class SourceMapController {
       limit = 10,
     } = query;
     const expirationStatus = query['expirationStatus'];
+    const allowedSortColumns: (keyof SourceMapEntity)[] = [
+      'uploadedAt',
+      'expiresAt',
+      'filename',
+      'version',
+    ];
+    const sortColumn = allowedSortColumns.includes(sortBy as keyof SourceMapEntity)
+      ? (sortBy as keyof SourceMapEntity)
+      : 'uploadedAt';
 
     try {
-      const filter: any = {};
+      const filter: any = {
+        projectId: query['projectId'] || query['project'],
+        version: query['version'],
+        search,
+        expirationStatus,
+      };
 
-      // Search filter
-      if (search) {
-        filter.filename = { $regex: search, $options: 'i' };
-      }
-
-      // Expiration filter
-      if (expirationStatus) {
-        const now = new Date();
-        if (expirationStatus === 'expired') {
-          filter.expiresAt = { $lt: now };
-        } else {
-          filter.expiresAt = { $gte: now };
-        }
-      }
-
-      const skip = (page - 1) * limit;
-      const total = await this.sourceMapService
-        .findByProjectAndVersion('', '', page, limit)
-        .then((result) => result.total)
-        .catch(() => 0);
-      const totalPages = Math.ceil(total / limit);
-
-      const sort: any = {};
-      sort[sortBy] = sortOrder === SortOrder.ASC ? 1 : -1;
-
-      const data = await this.sourceMapService
-        .findByProjectAndVersion('', '', page, limit)
-        .then((result) => result.data)
-        .catch(() => []);
+      const normalizedSortOrder = sortOrder === SortOrder.ASC ? 'ASC' : 'DESC';
+      const result = await this.sourceMapService.advancedSearch(
+        filter,
+        page,
+        limit,
+        sortColumn,
+        normalizedSortOrder,
+        includeContent ?? false
+      );
 
       return {
         success: true,
-        data: data.map((doc) => ({
+        data: result.data.map((doc) => ({
           id: doc.id,
           filename: doc.filename,
           version: doc.version,
@@ -293,10 +288,10 @@ export class SourceMapController {
           ...(includeContent && { content: doc.content }),
         })),
         pagination: {
-          page,
-          limit,
-          total,
-          totalPages,
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages,
         },
       };
     } catch (error) {

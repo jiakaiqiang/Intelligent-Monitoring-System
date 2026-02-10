@@ -1,6 +1,6 @@
 # @monitor/server 架构解剖
 
-`packages/server` 基于 NestJS，`src/app.module.ts` 聚合配置、Mongo、SourceMap、报表、错误映射、AI 分析等模块，`src/main.ts` 统一配置全局过滤器、压缩与 CORS。
+`packages/server` 基于 NestJS，`src/app.module.ts` 聚合配置、MySQL、SourceMap、报表、错误映射、AI 分析等模块，`src/main.ts` 统一配置全局过滤器、压缩与 CORS。
 
 ## 1. 模块关系图
 
@@ -18,9 +18,9 @@ flowchart LR
   SMCtrl --> SMsvc
   SMVerCtrl --> SMVerSvc[SourceMapVersionService\nsourcemap/sourcemap-version.service.ts]
 
-  ReportSvc --> Mongo[(MongoDB\nReportSchema)]
-  SMsvc --> Mongo
-  SMVerSvc --> Mongo
+  ReportSvc --> MySQL[(MySQL\nReportEntity)]
+  SMsvc --> MySQL
+  SMVerSvc --> MySQL
   SMsvc --> Cache[(CacheModule\nTTL 300s)]
 
   subgraph Async/AI
@@ -43,7 +43,7 @@ sequenceDiagram
   participant ErrMap as ErrorMappingService
   participant SMsvc as SourceMapService
   participant Repo as ReportService
-  participant Mongo
+  participant MySQL
 
   SDK->>ReportCtrl: POST /api/jkq (errors, sourceMaps)
   alt 上报带 SourceMap
@@ -55,7 +55,7 @@ sequenceDiagram
   end
   ErrMap-->>ReportCtrl: {mappedErrors, originalErrors}
   ReportCtrl->>Repo: create(reportData + processedData)
-  Repo->>Mongo: save ReportSchema
+  Repo->>MySQL: save ReportEntity
   Repo-->>ReportCtrl: 保存结果
   ReportCtrl-->>SDK: 响应
 ```
@@ -69,12 +69,12 @@ sequenceDiagram
 | SourceMapModule        | `SourceMapController` 管理 SourceMap 上传/查询/健康检查，`SourceMapService` 封装 CRUD、分页、Base64 解码、`source-map` 消费者 | `sourcemap/`     |
 | SourceMapVersionModule | `SourceMapVersionController/Service` 维护版本级操作（创建、回滚、对比、建议、清理）并使用聚合统计 `fileCount/totalSize`       | `sourcemap/`     |
 | ErrorMappingModule     | `ErrorMappingService` 在 `processReport()` 中匹配 SourceMap、生成 `MappedErrorInfo` 并调用 `ReportService.saveMappedErrors()` | `error-mapping/` |
-| ErrorReportModule      | 注册 `ErrorReportSchema`，用于保存精细化错误记录（当前仅导出 `MongooseModule`）                                               | `error-report/`  |
+| ErrorReportModule      | 注册 `ErrorReportEntity`，用于保存精细化错误记录（导出 `TypeOrmModule`）                                                      | `error-report/`  |
 | AiModule & QueueModule | `AiService` 通过 `modelAnalysis()` 调外部模型，`QueueService` 以 Redis list 实现 `push/pop/length`，支撑异步分析              | `ai/`, `queue/`  |
 
 ## 4. 存储与基础设施
 
-- **MongoDB**：`MongooseModule.forRoot()` 连接 `process.env.MONGO_URI`；`schemas/report.schema.ts`、`schemas/sourcemap.schema.ts`、`schemas/error-report.schema.ts` 按项目 ID 建立索引，`SourceMapSchema` 额外维护 `expiresAt` 以便清理。
+- **MySQL**：通过 `TypeOrmModule.forRoot()` 读取 `MYSQL_*` 环境变量；`report/entities/report.entity.ts`、`sourcemap/entities/sourcemap.entity.ts`、`error-report/entities/error-report.entity.ts` 定义核心表结构并建立索引，SourceMap 表维护 `expiresAt` 便于定时清理。
 - **缓存**：`SourceMapModule` 注册 `CacheModule`（`ttl=300`），`SourceMapVersionService` 注入 `CACHE_MANAGER` 准备缓存版本列表（部分 `cache.del` 暂注释以简化调试）。
 - **Redis 队列**：`QueueService` 在 `onModuleInit()` 中建立单一连接，提供 JSON 化的 `push`/`pop`，用于 AI 分析或后续异步任务。
 - **外部模型服务**：`AiService` 通过 `modelAnalysis()` 调用 `https://docs.newapi.pro/v1/chat/completions` 并依赖 `Authorization` 头中的密钥，建议迁移到 `.env`。

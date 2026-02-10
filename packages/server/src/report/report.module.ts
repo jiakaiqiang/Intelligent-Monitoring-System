@@ -1,16 +1,16 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { ReportController } from './report.controller';
 import { ReportService } from './report.service';
-import { Report, ReportSchema } from './schemas/report.schema';
+import { ReportEntity } from './entities/report.entity';
 // import { QueueModule } from '../queue/queue.module';
 // import { AiModule } from '../ai/ai.module';
 
-// ReportModule 聚合了报告控制器+服务+Mongoose schema，
+// ReportModule 聚合了报告控制器+服务+TypeORM entity，
 // 作为 SDK 上报入口的核心模块。
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Report.name, schema: ReportSchema }]),
+    TypeOrmModule.forFeature([ReportEntity]),
     // QueueModule,
     // AiModule,
   ],

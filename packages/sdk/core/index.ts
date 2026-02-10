@@ -17,7 +17,6 @@ export interface MonitorConfig {
   enableRetry?: boolean;
   version?: string; // 项目版本号
 }
-
 export class Monitor {
   /**
    * 配置对象，包含监控实例的所有配置选项
@@ -63,7 +62,7 @@ export class Monitor {
    * 已上传的 SourceMap 文件信息数组
    * 存储格式包含文件名、URL和版本号
    */
-  private sourceMaps: Array<{ filename: string; url: string; version?: string }> = [];
+  private sourceMaps: Array<{ filename: string; content: string; version?: string }> = [];
 
   /**
    * Monitor 类构造函数
@@ -196,6 +195,7 @@ export class Monitor {
     version?: string
   ): Promise<void> {
     try {
+      //返回处理过后的sourceMap 文件信息 通过base64编码的content
       const sourceMapInfo = await this.sourceMapUploader.uploadSourceMap(file, filename, version);
       this.sourceMaps.push(sourceMapInfo);
       console.log(`Successfully uploaded SourceMap: ${filename}`);

@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { SourceMapVersionController } from './sourcemap-version.controller';
 import { SourceMapVersionService } from './sourcemap-version.service';
-import { SourceMapSchema, SourceMapEntity } from '../schemas/sourcemap.schema';
-import { MongooseModule } from '@nestjs/mongoose';
+import { SourceMapEntity } from './entities/sourcemap.entity';
 
 /**
  * SourceMapVersionModule：
@@ -11,7 +11,7 @@ import { MongooseModule } from '@nestjs/mongoose';
  */
 
 @Module({
-  imports: [MongooseModule.forFeature([{ name: SourceMapEntity.name, schema: SourceMapSchema }])],
+  imports: [TypeOrmModule.forFeature([SourceMapEntity])],
   controllers: [SourceMapVersionController],
   providers: [SourceMapVersionService],
   exports: [SourceMapVersionService],

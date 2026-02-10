@@ -1,4 +1,5 @@
 // Test setup file
+import 'reflect-metadata';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // Mock global objects

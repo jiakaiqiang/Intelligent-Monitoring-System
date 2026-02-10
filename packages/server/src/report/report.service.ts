@@ -1,9 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Report } from './schemas/report.schema';
-
-export type ReportDocument = Report & Document;
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ReportEntity } from './entities/report.entity';
 
 /**
  * ReportService
@@ -12,42 +10,44 @@ export type ReportDocument = Report & Document;
  */
 @Injectable()
 export class ReportService {
-  constructor(@InjectModel(Report.name) private readonly reportModel: Model<ReportDocument>) {}
+  constructor(
+    @InjectRepository(ReportEntity)
+    private readonly reportRepository: Repository<ReportEntity>
+  ) {}
 
   /**
    * 将上报的数据落库，并预留钩子触发异步分析（队列/AI）。
    */
-  async create(reportData: any) {
-    console.log('jkq', reportData);
+  async create(reportData: any): Promise<ReportEntity> {
+    const report = this.reportRepository.create({
+      projectId: reportData.projectId,
+      errorLogs: reportData.errors ?? reportData.errorLogs ?? null,
+      performance: reportData.performance ?? null,
+      actions: reportData.actions ?? null,
+      processedData: reportData.processedData ?? null,
+      aiAnalysis: reportData.aiAnalysis ?? null,
+    });
 
-    const report = new this.reportModel(reportData);
-    await report.save();
-
-    if (reportData.errors?.length > 0) {
-      // 推送到队列进行错误分析
-      // await this.queueService.push('error-analysis', {
-      //   reportId: report._id,
-      //   errors: reportData.errors,
-      // });
-      // const analysis = await this.aiService.analyzeError(reportData.errors);
-      // return { ...reportData, aiAnalysis: analysis };
-    }
-
-    return reportData;
+    return this.reportRepository.save(report);
   }
 
   /**
    * 查询指定项目最近的上报（默认 50 条，按创建时间倒序）。
    */
-  async findByProject(projectId: string, limit = 50) {
-    return this.reportModel.find({ projectId }).sort({ createdAt: -1 }).limit(limit).exec();
+  async findByProject(projectId: string, limit = 50): Promise<ReportEntity[]> {
+    return this.reportRepository.find({
+      where: { projectId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
   }
 
   /**
    * 将 AI 分析结果写回指定报告，方便 Dashboard 展示。
    */
-  async updateAiAnalysis(reportId: string, analysis: string) {
-    return this.reportModel.findByIdAndUpdate(reportId, { aiAnalysis: analysis }, { new: true });
+  async updateAiAnalysis(reportId: string, analysis: string): Promise<ReportEntity | null> {
+    await this.reportRepository.update({ id: reportId }, { aiAnalysis: analysis });
+    return this.reportRepository.findOne({ where: { id: reportId } });
   }
 
   /**
@@ -55,26 +55,24 @@ export class ReportService {
    */
   async saveMappedErrors(projectId: string, errors: any[]): Promise<void> {
     try {
-      // 为每个映射后的错误创建记录
-      const errorDocs = errors.map((error) => ({
-        projectId,
-        errors: [
-          {
-            ...error,
-            // 标记为已映射
-            mapped: true,
-            mappedStack: error.mappedStack,
-            sourceFile: error.sourceFile,
-            sourceLine: error.sourceLine,
-            sourceColumn: error.sourceColumn,
-          },
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }));
+      const errorDocs = errors.map((error) =>
+        this.reportRepository.create({
+          projectId,
+          errorLogs: [
+            {
+              ...error,
+              mapped: true,
+              mappedStack: error.mappedStack,
+              sourceFile: error.sourceFile,
+              sourceLine: error.sourceLine,
+              sourceColumn: error.sourceColumn,
+            },
+          ],
+          processedData: { mapped: true },
+        })
+      );
 
-      // 批量保存
-      await this.reportModel.insertMany(errorDocs);
+      await this.reportRepository.save(errorDocs);
     } catch (error) {
       console.error('Failed to save mapped errors:', error);
       throw error;

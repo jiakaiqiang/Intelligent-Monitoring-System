@@ -1,14 +1,12 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { ErrorReportEntity, ErrorReportSchema } from '../schemas/error-report.schema';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ErrorReportEntity } from './entities/error-report.entity';
 
 // ErrorReportModule 将错误报告集合注册到 Nest IoC，
 // 供 ReportService、AI 模块等读取/写入错误数据。
 @Module({
-  imports: [
-    MongooseModule.forFeature([{ name: ErrorReportEntity.name, schema: ErrorReportSchema }]),
-  ],
+  imports: [TypeOrmModule.forFeature([ErrorReportEntity])],
   providers: [],
-  exports: [MongooseModule],
+  exports: [TypeOrmModule],
 })
 export class ErrorReportModule {}
