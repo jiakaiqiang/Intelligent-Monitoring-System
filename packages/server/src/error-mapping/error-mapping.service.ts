@@ -4,14 +4,27 @@ import { SourceMapService } from '../sourcemap/sourcemap.service';
 import { ErrorInfo, SourceMapInfo, MappedErrorInfo } from '../shared/error-types';
 import * as sourceMap from 'source-map';
 
+/**
+ * ErrorMappingService
+ * --------------------
+ * 负责将 SDK 上报的压缩后堆栈回溯到原始 TypeScript/ESNext 源码。
+ *
+ * 核心流程：
+ * 1. 根据 report 中携带的 SourceMap 或数据库缓存找到合适的 map。
+ * 2. 调用 source-map Consumer 进行位置映射。
+ * 3. 把结果写回 ReportService，供 Dashboard 可视化展示。
+ */
 @Injectable()
 export class ErrorMappingService {
+  /**
+   * 简单的内存缓存，key=文件+行列+版本，value=映射结果，减少重复解析 SourceMap 的成本。
+   */
   private cache = new Map<string, any>();
   private cacheTimeout = 60 * 1000; // 1分钟缓存
 
   constructor(
     private readonly reportService: ReportService,
-    private readonly sourceMapService: SourceMapService,
+    private readonly sourceMapService: SourceMapService
   ) {}
 
   /**
@@ -58,7 +71,7 @@ export class ErrorMappingService {
 
     return {
       originalErrors: errors,
-      mappedErrors
+      mappedErrors,
     };
   }
 
@@ -114,7 +127,10 @@ export class ErrorMappingService {
     const version = error.version;
 
     // 从数据库获取 SourceMap
-    const sourceMapsResult = await this.sourceMapService.findByProjectAndVersion(projectId, version);
+    const sourceMapsResult = await this.sourceMapService.findByProjectAndVersion(
+      projectId,
+      version
+    );
     const sourceMaps = sourceMapsResult.data;
 
     if (sourceMaps.length === 0) {
@@ -164,7 +180,7 @@ export class ErrorMappingService {
       const originalPosition = consumer.originalPositionFor({
         line,
         column,
-        bias: sourceMap.SourceMapConsumer.LEAST_UPPER_BOUND
+        bias: sourceMap.SourceMapConsumer.LEAST_UPPER_BOUND,
       });
 
       // 销毁消费者
@@ -174,7 +190,7 @@ export class ErrorMappingService {
         const result = {
           source: originalPosition.source,
           line: originalPosition.line || line,
-          column: originalPosition.column || column
+          column: originalPosition.column || column,
         };
 
         // 缓存结果
@@ -205,18 +221,17 @@ export class ErrorMappingService {
 
     // 1. 优先根据版本和文件名精确匹配
     if (version) {
-      const exactMatch = sourceMaps.find(sm =>
-        sm.version === version &&
-        (sm.filename === `${file}.map` || sm.filename.includes(file))
+      const exactMatch = sourceMaps.find(
+        (sm) =>
+          sm.version === version && (sm.filename === `${file}.map` || sm.filename.includes(file))
       );
       if (exactMatch) return exactMatch;
     }
 
     // 2. 根据文件名匹配
-    const filenameMatch = sourceMaps.find(sm =>
-      sm.filename === `${file}.map` ||
-      sm.filename.endsWith(file) ||
-      sm.filename.includes(file)
+    const filenameMatch = sourceMaps.find(
+      (sm) =>
+        sm.filename === `${file}.map` || sm.filename.endsWith(file) || sm.filename.includes(file)
     );
     if (filenameMatch) return filenameMatch;
 
@@ -259,12 +274,12 @@ export class ErrorMappingService {
         sourceFile,
         sourceLine: parseInt(sourceLine),
         sourceColumn: parseInt(sourceColumn),
-        mappedStack: error.stack
+        mappedStack: error.stack,
       };
     }
 
     return {
-      mappedStack: error.stack
+      mappedStack: error.stack,
     };
   }
 

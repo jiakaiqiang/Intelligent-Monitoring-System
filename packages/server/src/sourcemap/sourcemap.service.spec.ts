@@ -1,3 +1,4 @@
+// SourceMapService 单元测试：通过 mock 的 Mongoose model 验证核心 CRUD 行为。
 import { Test, TestingModule } from '@nestjs/testing';
 import { SourceMapService } from './sourcemap.service';
 import { getModelToken } from '@nestjs/mongoose';

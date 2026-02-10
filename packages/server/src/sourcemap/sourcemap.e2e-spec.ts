@@ -1,3 +1,4 @@
+// EnhancedSourceMapParser 行为测试：通过 mock source-map 库验证映射流程。
 import { EnhancedSourceMapParser } from '@monitor/sdk/core/sourcemap';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SourceMapInfo } from '@monitor/shared/types';

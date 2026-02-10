@@ -5,14 +5,21 @@ import { Report } from './schemas/report.schema';
 
 export type ReportDocument = Report & Document;
 
+/**
+ * ReportService
+ * --------------
+ * 封装了与报告集合相关的所有数据库操作，包括创建、查询以及 AI 分析结果的更新。
+ */
 @Injectable()
 export class ReportService {
   constructor(@InjectModel(Report.name) private readonly reportModel: Model<ReportDocument>) {}
 
+  /**
+   * 将上报的数据落库，并预留钩子触发异步分析（队列/AI）。
+   */
   async create(reportData: any) {
     console.log('jkq', reportData);
 
-    // 创建报告文档
     const report = new this.reportModel(reportData);
     await report.save();
 
@@ -29,10 +36,16 @@ export class ReportService {
     return reportData;
   }
 
+  /**
+   * 查询指定项目最近的上报（默认 50 条，按创建时间倒序）。
+   */
   async findByProject(projectId: string, limit = 50) {
     return this.reportModel.find({ projectId }).sort({ createdAt: -1 }).limit(limit).exec();
   }
 
+  /**
+   * 将 AI 分析结果写回指定报告，方便 Dashboard 展示。
+   */
   async updateAiAnalysis(reportId: string, analysis: string) {
     return this.reportModel.findByIdAndUpdate(reportId, { aiAnalysis: analysis }, { new: true });
   }

@@ -16,34 +16,35 @@ export class LoggerMiddleware implements NestMiddleware {
     const { method, originalUrl, ip, body, params, query } = req;
     const userAgent = req.get('user-agent') || '';
     const startTime = Date.now();
+    const logger = this.logger;
 
-    // Log request
-    this.logger.log(`[${method}] ${originalUrl} - IP: ${ip} - User-Agent: ${userAgent}`);
+    // 入站日志：记录请求线索，方便与后续响应对齐
+    logger.log(`[${method}] ${originalUrl} - IP: ${ip} - User-Agent: ${userAgent}`);
 
-    // Log request body and params only for development
+    // 在开发环境输出更详细的上下文，协助排查联调问题
     if (process.env.NODE_ENV === 'development') {
-      this.logger.debug(`Request Body: ${JSON.stringify(body)}`);
-      this.logger.debug(`Query Params: ${JSON.stringify(query)}`);
-      this.logger.debug(`Route Params: ${JSON.stringify(params)}`);
+      logger.debug(`Request Body: ${JSON.stringify(body)}`);
+      logger.debug(`Query Params: ${JSON.stringify(query)}`);
+      logger.debug(`Route Params: ${JSON.stringify(params)}`);
     }
 
-    // Override end method to添加耗时日志
+    // 通过重写 `res.end` 捕获响应完成时机，以计算耗时。
     const originalEnd = res.end;
     res.end = function (chunk?: any, encoding?: any) {
       const responseTime = Date.now() - startTime;
       const { statusCode } = this;
 
-      // Log response with performance metrics
-      this.logger.log(`[${method}] ${originalUrl} ${statusCode} - ${responseTime}ms - IP: ${ip}`);
+      // 响应日志：输出状态码与耗时，供性能监控/慢查询排查使用
+      logger.log(`[${method}] ${originalUrl} ${statusCode} - ${responseTime}ms - IP: ${ip}`);
 
-      // Log slow requests (>1000ms)
+      // 当耗时超过 1s 时提示潜在性能问题
       if (responseTime > 1000) {
-        this.logger.warn(`Slow request detected: ${originalUrl} took ${responseTime}ms`);
+        logger.warn(`Slow request detected: ${originalUrl} took ${responseTime}ms`);
       }
 
-      // Log errors
+      // 统一记录 4xx/5xx 以便集中分析错误热度
       if (statusCode >= 400) {
-        this.logger.error(`Error response: ${statusCode} for ${originalUrl} - ${responseTime}ms`);
+        logger.error(`Error response: ${statusCode} for ${originalUrl} - ${responseTime}ms`);
       }
 
       return originalEnd.call(this, chunk, encoding);

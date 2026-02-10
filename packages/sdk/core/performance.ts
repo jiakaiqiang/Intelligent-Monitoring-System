@@ -1,4 +1,5 @@
 import { PerformanceMetrics } from '@monitor/shared/types';
+import { onCLS, onFCP, onINP, onLCP } from 'web-vitals';
 
 /**
  * 性能监控类
@@ -24,10 +25,12 @@ export class PerformanceMonitor {
    * 注册所有核心性能指标的观察者
    */
   private init() {
-    this.observeFCP();  // 首次内容绘制时间
-    this.observeLCP();  // 最大内容绘制时间
-    this.observeFID();  // 首次输入延迟
-    this.observeCLS();  // 累积布局偏移
+    if (typeof window === 'undefined') return;
+
+    this.observeFCP(); // 首次内容绘制时间
+    this.observeLCP(); // 最大内容绘制时间
+    this.observeFID(); // 首次输入延迟
+    this.observeCLS(); // 累积布局偏移
   }
 
   /**
@@ -36,22 +39,10 @@ export class PerformanceMonitor {
    * 实现原理：通过 PerformanceObserver 监听 paint 类型的性能条目
    */
   private observeFCP() {
-    // 检查浏览器是否支持 PerformanceObserver API
-    if (!('PerformanceObserver' in window)) return;
-
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        if (entry.name === 'first-contentful-paint') {
-          // 记录 FCP 时间戳
-          this.metrics.fcp = entry.startTime;
-          // 检查是否可以报告数据（需要 FCP 和 LCP）
-          this.checkAndReport();
-        }
-      }
+    onFCP((metric) => {
+      this.metrics.fcp = metric.value;
+      this.checkAndReport();
     });
-
-    // 开始观察 paint 类型的性能条目
-    observer.observe({ entryTypes: ['paint'] });
   }
 
   /**
@@ -60,40 +51,22 @@ export class PerformanceMonitor {
    * 实现原理：通过 PerformanceObserver 监听 largest-contentful-paint 类型的性能条目
    */
   private observeLCP() {
-    if (!('PerformanceObserver' in window)) return;
-
-    const observer = new PerformanceObserver((list) => {
-      const entries = list.getEntries();
-      const lastEntry = entries[entries.length - 1];
-      // 记录 LCP 时间戳
-      this.metrics.lcp = lastEntry.startTime;
-      // 检查是否可以报告数据（需要 FCP 和 LCP）
+    onLCP((metric) => {
+      this.metrics.lcp = metric.value;
       this.checkAndReport();
     });
-
-    // 开始观察 largest-contentful-paint 类型的性能条目
-    observer.observe({ entryTypes: ['largest-contentful-paint'] });
   }
 
   /**
    * 观察首次输入延迟 (First Input Delay)
    * FID 测量用户第一次与页面交互到浏览器实际能够响应该交互的时间
-   * 实现原理：通过 PerformanceObserver 监听 first-input 类型的性能条目
+   * 实现原理：通过 PerformanceObserver 监听 interaction 类型的性能条目
    */
   private observeFID() {
-    if (!('PerformanceObserver' in window)) return;
-
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        const fidEntry = entry as PerformanceEventTiming;
-        // 计算 FID：处理开始时间减去事件开始时间
-        this.metrics.fid = fidEntry.processingStart - fidEntry.startTime;
-        this.checkAndReport();
-      }
+    onINP((metric) => {
+      this.metrics.fid = metric.value;
+      this.checkAndReport();
     });
-
-    // 开始观察 first-input 类型的性能条目
-    observer.observe({ entryTypes: ['first-input'] });
   }
 
   /**
@@ -102,22 +75,10 @@ export class PerformanceMonitor {
    * 实现原理：通过 PerformanceObserver 监听 layout-shift 类型的性能条目
    */
   private observeCLS() {
-    if (!('PerformanceObserver' in window)) return;
-
-    let clsValue = 0;
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        if (!(entry as any).hadRecentInput) {
-          // 累加布局偏移值
-          clsValue += (entry as any).value;
-          this.metrics.cls = clsValue;
-        }
-      }
+    onCLS((metric) => {
+      this.metrics.cls = metric.value;
       this.checkAndReport();
     });
-
-    // 开始观察 layout-shift 类型的性能条目
-    observer.observe({ entryTypes: ['layout-shift'] });
   }
 
   /**

@@ -6,6 +6,8 @@ import { Report, ReportSchema } from './schemas/report.schema';
 // import { QueueModule } from '../queue/queue.module';
 // import { AiModule } from '../ai/ai.module';
 
+// ReportModule 聚合了报告控制器+服务+Mongoose schema，
+// 作为 SDK 上报入口的核心模块。
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Report.name, schema: ReportSchema }]),

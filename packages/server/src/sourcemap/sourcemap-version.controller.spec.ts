@@ -1,3 +1,4 @@
+// SourceMapVersionController 测试：覆盖版本 CRUD/回滚/批量操作等典型路径。
 import { Test, TestingModule } from '@nestjs/testing';
 import { SourceMapVersionController } from './sourcemap-version.controller';
 import { SourceMapVersionService } from './sourcemap-version.service';
@@ -11,7 +12,7 @@ const mockVersionService = {
   compareVersions: jest.fn(),
   cleanupExpiredVersions: jest.fn(),
   suggestNewVersion: jest.fn(),
-  batchVersionCleanup: jest.fn()
+  batchVersionCleanup: jest.fn(),
 };
 
 describe('SourceMapVersionController', () => {
@@ -24,9 +25,9 @@ describe('SourceMapVersionController', () => {
       providers: [
         {
           provide: SourceMapVersionService,
-          useValue: mockVersionService
-        }
-      ]
+          useValue: mockVersionService,
+        },
+      ],
     }).compile();
 
     controller = module.get<SourceMapVersionController>(SourceMapVersionController);
@@ -45,15 +46,15 @@ describe('SourceMapVersionController', () => {
           uploadedAt: new Date(),
           fileCount: 5,
           totalSize: 1024,
-          expiresAt: new Date()
+          expiresAt: new Date(),
         },
         {
           version: '1.1.0',
           uploadedAt: new Date(),
           fileCount: 3,
           totalSize: 512,
-          expiresAt: new Date()
-        }
+          expiresAt: new Date(),
+        },
       ];
 
       mockVersionService.getAllVersions.mockResolvedValue(mockVersions);
@@ -78,10 +79,10 @@ describe('SourceMapVersionController', () => {
         sourceMaps: [
           {
             filename: 'app.js.map',
-            content: 'test-content'
-          }
+            content: 'test-content',
+          },
         ],
-        parentVersion: '1.1.0'
+        parentVersion: '1.1.0',
       };
 
       const mockDocuments = [
@@ -90,8 +91,8 @@ describe('SourceMapVersionController', () => {
           filename: 'app.js.map',
           version: '1.2.0',
           parentVersion: '1.1.0',
-          uploadedAt: new Date()
-        }
+          uploadedAt: new Date(),
+        },
       ];
 
       mockVersionService.createVersion.mockResolvedValue(mockDocuments);
@@ -112,15 +113,16 @@ describe('SourceMapVersionController', () => {
     it('should handle version already exists', async () => {
       const createDto = {
         version: '1.0.0',
-        sourceMaps: []
+        sourceMaps: [],
       };
 
       mockVersionService.createVersion.mockRejectedValue(
         new BadRequestException('Version 1.0.0 already exists')
       );
 
-      await expect(controller.createVersion('test-project', createDto))
-        .rejects.toThrow(BadRequestException);
+      await expect(controller.createVersion('test-project', createDto)).rejects.toThrow(
+        BadRequestException
+      );
     });
   });
 
@@ -128,7 +130,7 @@ describe('SourceMapVersionController', () => {
     it('should rollback to a specific version', async () => {
       const rollbackDto = {
         targetVersion: '1.0.0',
-        newVersion: '1.0.1'
+        newVersion: '1.0.1',
       };
 
       const mockDocuments = [
@@ -137,8 +139,8 @@ describe('SourceMapVersionController', () => {
           filename: 'app.js.map',
           version: '1.0.1',
           parentVersion: '1.0.0',
-          uploadedAt: new Date()
-        }
+          uploadedAt: new Date(),
+        },
       ];
 
       mockVersionService.rollbackToVersion.mockResolvedValue(mockDocuments);
@@ -147,25 +149,22 @@ describe('SourceMapVersionController', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toContain('rolled back from 1.0.0');
-      expect(service.rollbackToVersion).toHaveBeenCalledWith(
-        'test-project',
-        '1.0.0',
-        '1.0.1'
-      );
+      expect(service.rollbackToVersion).toHaveBeenCalledWith('test-project', '1.0.0', '1.0.1');
     });
 
     it('should handle target version not found', async () => {
       const rollbackDto = {
         targetVersion: '0.0.0',
-        newVersion: '1.0.1'
+        newVersion: '1.0.1',
       };
 
       mockVersionService.rollbackToVersion.mockRejectedValue(
         new NotFoundException('Target version 0.0.0 not found')
       );
 
-      await expect(controller.rollback('test-project', rollbackDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(controller.rollback('test-project', rollbackDto)).rejects.toThrow(
+        NotFoundException
+      );
     });
   });
 
@@ -173,7 +172,7 @@ describe('SourceMapVersionController', () => {
     it('should compare two versions', async () => {
       const compareDto = {
         version1: '1.0.0',
-        version2: '1.1.0'
+        version2: '1.1.0',
       };
 
       const mockComparison = {
@@ -185,9 +184,9 @@ describe('SourceMapVersionController', () => {
             filename: 'app.js.map',
             sizeChange: 100,
             uploadedAtOld: new Date(),
-            uploadedAtNew: new Date()
-          }
-        ]
+            uploadedAtNew: new Date(),
+          },
+        ],
       };
 
       mockVersionService.compareVersions.mockResolvedValue(mockComparison);
@@ -196,25 +195,21 @@ describe('SourceMapVersionController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockComparison);
-      expect(service.compareVersions).toHaveBeenCalledWith(
-        'test-project',
-        '1.0.0',
-        '1.1.0'
-      );
+      expect(service.compareVersions).toHaveBeenCalledWith('test-project', '1.0.0', '1.1.0');
     });
   });
 
   describe('suggestNewVersion', () => {
     it('should suggest a new version', async () => {
       const suggestDto = {
-        currentVersion: '1.0.0'
+        currentVersion: '1.0.0',
       };
 
       const mockSuggestion = {
         suggestedVersion: '1.0.1',
         reason: 'New SourceMap files detected',
         fileCount: 3,
-        sizeChange: 512
+        sizeChange: 512,
       };
 
       mockVersionService.suggestNewVersion.mockResolvedValue(mockSuggestion);
@@ -223,23 +218,21 @@ describe('SourceMapVersionController', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockSuggestion);
-      expect(service.suggestNewVersion).toHaveBeenCalledWith(
-        'test-project',
-        '1.0.0'
-      );
+      expect(service.suggestNewVersion).toHaveBeenCalledWith('test-project', '1.0.0');
     });
 
     it('should handle current version not found', async () => {
       const suggestDto = {
-        currentVersion: '0.0.0'
+        currentVersion: '0.0.0',
       };
 
       mockVersionService.suggestNewVersion.mockRejectedValue(
         new NotFoundException('Current version 0.0.0 not found')
       );
 
-      await expect(controller.suggestNewVersion('test-project', suggestDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(controller.suggestNewVersion('test-project', suggestDto)).rejects.toThrow(
+        NotFoundException
+      );
     });
   });
 
@@ -250,7 +243,7 @@ describe('SourceMapVersionController', () => {
       const mockResult = {
         cleanedVersions: ['1.0.0'],
         totalFiles: 5,
-        totalSize: 1024
+        totalSize: 1024,
       };
 
       mockVersionService.cleanupExpiredVersions.mockResolvedValue(mockResult);
@@ -268,7 +261,7 @@ describe('SourceMapVersionController', () => {
       const mockResult = {
         cleanedVersions: ['1.0.0'],
         totalFiles: 5,
-        totalSize: 1024
+        totalSize: 1024,
       };
 
       mockVersionService.cleanupExpiredVersions.mockResolvedValue(mockResult);
@@ -285,7 +278,7 @@ describe('SourceMapVersionController', () => {
     it('should require confirmation to proceed', async () => {
       const body = {
         versions: ['1.0.0', '1.1.0'],
-        confirm: false
+        confirm: false,
       };
 
       const result = await controller.batchDelete('test-project', body);
@@ -297,16 +290,13 @@ describe('SourceMapVersionController', () => {
     it('should delete specified versions when confirmed', async () => {
       const body = {
         versions: ['1.0.0', '1.1.0'],
-        confirm: true
+        confirm: true,
       };
 
       const mockResult = {
         cleaned: 2,
         errors: [],
-        details: [
-          'Deleted version 1.0.0 (3 files)',
-          'Deleted version 1.1.0 (2 files)'
-        ]
+        details: ['Deleted version 1.0.0 (3 files)', 'Deleted version 1.1.0 (2 files)'],
       };
 
       mockVersionService.batchVersionCleanup.mockResolvedValue(mockResult);
@@ -321,11 +311,12 @@ describe('SourceMapVersionController', () => {
     it('should throw error for empty versions array', async () => {
       const body = {
         versions: [],
-        confirm: true
+        confirm: true,
       };
 
-      await expect(controller.batchDelete('test-project', body))
-        .rejects.toThrow(BadRequestException);
+      await expect(controller.batchDelete('test-project', body)).rejects.toThrow(
+        BadRequestException
+      );
     });
   });
 
@@ -336,8 +327,8 @@ describe('SourceMapVersionController', () => {
           filename: 'app.js.map',
           size: 512,
           uploadedAt: new Date(),
-          content: 'test-content'
-        }
+          content: 'test-content',
+        },
       ];
 
       // Mock the underlying methods
@@ -347,8 +338,8 @@ describe('SourceMapVersionController', () => {
           uploadedAt: new Date(),
           fileCount: 1,
           totalSize: 512,
-          expiresAt: new Date()
-        }
+          expiresAt: new Date(),
+        },
       ];
 
       mockVersionService.getAllVersions.mockResolvedValue(mockVersions);
@@ -357,9 +348,9 @@ describe('SourceMapVersionController', () => {
       const mockModel = {
         find: jest.fn().mockReturnValue({
           select: jest.fn().mockReturnValue({
-            lean: jest.fn().mockResolvedValue(mockFiles)
-          })
-        })
+            lean: jest.fn().mockResolvedValue(mockFiles),
+          }),
+        }),
       };
       (service as any).sourceMapModel = mockModel;
 
@@ -375,9 +366,9 @@ describe('SourceMapVersionController', () => {
     it('should throw error for non-existent version', async () => {
       mockVersionService.getAllVersions.mockResolvedValue([]);
 
-      await expect(
-        controller.getVersionDetails('test-project', '0.0.0')
-      ).rejects.toThrow(NotFoundException);
+      await expect(controller.getVersionDetails('test-project', '0.0.0')).rejects.toThrow(
+        NotFoundException
+      );
     });
   });
 });

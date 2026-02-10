@@ -70,19 +70,19 @@ export class Monitor {
    * @param config 监控配置对象
    */
   constructor(config: MonitorConfig) {
-    // 合并默认配置和用户配置
+    // 合并默认配置和用户配置 
     this.config = {
-      maxErrors: 10,
-      sampleRate: 1,
-      enableCompression: false,
-      enableRetry: true,
+      maxErrors: 10,//错误队列最大长度
+      sampleRate: 1,//采样率，默认100%
+      enableCompression: false,//是否启用压缩，默认不启用
+      enableRetry: true,//是否启用重试，默认启用
       ...config,
     };
     // 初始化重试管理器
     this.retryManager = new RetryManager();
     // 初始化 SourceMap 解析器
     this.sourceMapParser = new EnhancedSourceMapParser();
-    // 初始化 SourceMap 上传器
+    // 初始化 SourceMap 上传器，设置上报 URL、项目 ID 和版本号
     this.sourceMapUploader = new SourceMapUploader(
       this.config.reportUrl,
       this.config.projectId,
@@ -96,9 +96,13 @@ export class Monitor {
    * 初始化监控实例，顺序启动错误捕获、性能监控、行为追踪以及插件
    */
   private init() {
+    //初始化错误
     this.setupErrorHandlers();
+    //初始化性能监控
     this.setupPerformanceMonitor();
+    //初始化行为追踪
     this.setupActionTracking();
+    // 安装插件
     this.config.plugins?.install(this);
   }
 
@@ -110,6 +114,7 @@ export class Monitor {
       'error',
       (event) => {
         if (event.target !== window) {
+          //资源加载问题
           const target = event.target as HTMLElement;
           const errorInfo: ErrorInfo = {
             message: `Resource failed to load: ${target.tagName}`,
@@ -122,6 +127,7 @@ export class Monitor {
           };
           this.addError(errorInfo);
         } else {
+          //js代码执行问题
           const errorInfo: ErrorInfo = {
             message: event.message,
             stack: event.error?.stack,
@@ -136,11 +142,11 @@ export class Monitor {
       },
       true
     );
-
+    //监听未处理的promise拒绝事件
     window.addEventListener('unhandledrejection', (event) => {
       const errorInfo: ErrorInfo = {
         message: event.reason?.message || String(event.reason),
-        stack: event.reason?.stack,
+        stack: event.reason?.stack || '',//promise拒绝时的栈信息
         type: 'promise',
         timestamp: Date.now(),
         url: window.location.href,
@@ -157,6 +163,7 @@ export class Monitor {
   private setupPerformanceMonitor() {
     this.performanceMonitor = new PerformanceMonitor((metrics) => {
       this.performanceMetrics = metrics;
+      //性能采集完进行上报
       this.report();
     });
   }
@@ -172,6 +179,7 @@ export class Monitor {
         target: target.tagName,
         timestamp: Date.now(),
       };
+      //点击事件写入队列
       this.actionQueue.push(action);
     });
   }

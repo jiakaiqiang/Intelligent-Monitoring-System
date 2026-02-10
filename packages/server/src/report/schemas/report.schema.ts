@@ -1,11 +1,22 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
+/**
+ * Report Schema
+ * --------------
+ * 存储 SDK 每次上报的原始数据：错误日志、性能指标以及用户行为。
+ */
 @Schema({ timestamps: true })
 export class Report extends Document {
+  /**
+   * projectId 用于区分不同的接入方，并建立查询索引。
+   */
   @Prop({ required: true, index: true })
   projectId: string;
 
+  /**
+   * errorLogs 保存原始堆栈与上下文信息，便于后续离线分析。
+   */
   @Prop({ type: Array })
   errorLogs: Array<{
     message: string;
@@ -16,6 +27,9 @@ export class Report extends Document {
     userAgent: string;
   }>;
 
+  /**
+   * performance 继承自浏览器 API，记录关键 Web Vitals。
+   */
   @Prop({ type: Object })
   performance: {
     fcp?: number;
@@ -25,6 +39,9 @@ export class Report extends Document {
     timestamp: number;
   };
 
+  /**
+   * actions 记录用户行为，帮助将错误与真实操作关联。
+   */
   @Prop({ type: Array })
   actions: Array<{
     type: string;

@@ -1,25 +1,47 @@
 import { Controller, Post, Get, Body, Param } from '@nestjs/common';
 import { ReportService } from './report.service';
 
+/**
+ * ReportController
+ * ----------------
+ * 暴露监控 SDK 的上报接口 `/api/jkq` 及后台调试接口。
+ * 目前包含：
+ * - `GET /api/report`：临时调试入口，直接返回请求体；
+ * - `POST /api/jkq`：SDK 主上报接口，会尝试进行 SourceMap 映射；
+ * - `GET /api/reports/:projectId`：查询指定项目的历史报告。
+ */
 @Controller('api')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
+  /**
+   * 简单的测试接口，用于验证网关/反向代理是否将请求正确转发到服务端。
+   */
   @Get('report')
   async createReport(@Body() reportData: any) {
-    console.log(reportData,'reportData')
-    return reportData
+    console.log(reportData, 'reportData');
+    return reportData;
     //return this.reportService.create(reportData);
   }
+
+  /**
+   * 健康检查 / 快速验证服务是否启动。
+   */
   @Get('test')
   async test() {
     return { message: 'test' };
   }
+
+  /**
+   * SDK 上报入口：
+   * 1. 动态加载 ErrorMappingService 进行 SourceMap 映射；
+   * 2. 将映射结果合并到报告数据后交给 ReportService 持久化；
+   * 3. 若映射失败则兜底保存原始 payload。
+   */
   @Post('jkq')
   async createJkq(@Body() jkqData: any) {
     console.log(jkqData, 'jkqData', this.reportService);
 
-    // 使用错误映射服务处理上报的数据
     try {
       const { ErrorMappingService } = await import('../error-mapping/error-mapping.service');
       const errorMappingService = new ErrorMappingService(this.reportService, {} as any);
@@ -27,13 +49,13 @@ export class ReportController {
       const processed = await errorMappingService.processReport({
         projectId: jkqData.projectId,
         errors: jkqData.errors,
-        sourceMaps: jkqData.sourceMaps
+        sourceMaps: jkqData.sourceMaps,
       });
 
       // 保存处理后的数据
       const result = await this.reportService.create({
         ...jkqData,
-        processedData: processed
+        processedData: processed,
       });
 
       return result;
@@ -44,6 +66,9 @@ export class ReportController {
     }
   }
 
+  /**
+   * 根据项目 ID 查询最近的报告，供 Dashboard 构建列表/趋势图。
+   */
   @Get('reports/:projectId')
   async getReports(@Param('projectId') projectId: string) {
     const data = await this.reportService.findByProject(projectId);

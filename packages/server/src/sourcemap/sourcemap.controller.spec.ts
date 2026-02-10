@@ -1,3 +1,4 @@
+// SourceMapController 测试：mock service 以验证各 REST 端点的行为与异常。
 import { Test, TestingModule } from '@nestjs/testing';
 import { SourceMapController } from './sourcemap.controller';
 import { SourceMapService } from './sourcemap.service';

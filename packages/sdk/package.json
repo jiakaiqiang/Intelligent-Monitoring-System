@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@monitor/shared": "workspace:*",
-    "source-map": "^0.7.4"
+    "source-map": "^0.7.4",
+    "web-vitals": "^4.2.4"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.3",
