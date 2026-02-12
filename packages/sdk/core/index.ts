@@ -7,6 +7,8 @@ import { RetryManager } from './retry';
 import { EnhancedSourceMapParser } from './sourcemap';
 import { SourceMapUploader } from './source-uploader';
 
+type QueuedError = ErrorInfo & { id: string };
+
 export interface MonitorConfig {
   projectId: string;
   reportUrl: string;
@@ -16,6 +18,7 @@ export interface MonitorConfig {
   enableCompression?: boolean;
   enableRetry?: boolean;
   version?: string; // 项目版本号
+  autoReport?: boolean; // 是否在捕获错误后自动上报，默认 true
 }
 export class Monitor {
   /**
@@ -26,7 +29,7 @@ export class Monitor {
   /**
    * 错误队列，存储待上报的错误信息
    */
-  private errorQueue: ErrorInfo[] = [];
+  private errorQueue: QueuedError[] = [];
 
   /**
    * 用户行为队列，存储待上报的用户交互行为
@@ -69,12 +72,13 @@ export class Monitor {
    * @param config 监控配置对象
    */
   constructor(config: MonitorConfig) {
-    // 合并默认配置和用户配置 
+    // 合并默认配置和用户配置
     this.config = {
-      maxErrors: 10,//错误队列最大长度
-      sampleRate: 1,//采样率，默认100%
-      enableCompression: false,//是否启用压缩，默认不启用
-      enableRetry: true,//是否启用重试，默认启用
+      maxErrors: 10, //错误队列最大长度
+      sampleRate: 1, //采样率，默认100%
+      enableCompression: false, //是否启用压缩，默认不启用
+      enableRetry: true, //是否启用重试，默认启用
+      autoReport: true, //是否自动上报，默认启用
       ...config,
     };
     // 初始化重试管理器
@@ -145,7 +149,7 @@ export class Monitor {
     window.addEventListener('unhandledrejection', (event) => {
       const errorInfo: ErrorInfo = {
         message: event.reason?.message || String(event.reason),
-        stack: event.reason?.stack || '',//promise拒绝时的栈信息
+        stack: event.reason?.stack || '', //promise拒绝时的栈信息
         type: 'promise',
         timestamp: Date.now(),
         url: window.location.href,
@@ -162,8 +166,7 @@ export class Monitor {
   private setupPerformanceMonitor() {
     this.performanceMonitor = new PerformanceMonitor((metrics) => {
       this.performanceMetrics = metrics;
-      //性能采集完进行上报
-      this.report();
+        this.report();
     });
   }
 
@@ -171,6 +174,7 @@ export class Monitor {
    * 追踪用户交互行为，目前监听点击事件写入队列
    */
   private setupActionTracking() {
+    // 使用捕获阶段，确保在按钮的 click handler 之前记录行为
     document.addEventListener('click', (event) => {
       const target = event.target as HTMLElement;
       const action: UserAction = {
@@ -180,7 +184,83 @@ export class Monitor {
       };
       //点击事件写入队列
       this.actionQueue.push(action);
-    });
+    }, true);
+  }
+
+  /**
+   * 将错误加入队列，按采样率与容量控制，同时尝试执行 SourceMap 映射
+   */
+  private addError(error: ErrorInfo) {
+    const sampleRate = Math.min(Math.max(this.config.sampleRate ?? 1, 0), 1);
+    if (Math.random() > sampleRate) {
+      return;
+    }
+
+    const normalized: QueuedError = {
+      ...error,
+      id: generateId(),
+      timestamp: error.timestamp || Date.now(),
+      url: error.url || window.location.href,
+      userAgent: error.userAgent || navigator.userAgent,
+      version: error.version ?? this.config.version,
+    };
+
+    // 先同步将错误添加到队列，确保错误不会丢失
+    const maxErrors = this.config.maxErrors ?? 10;
+    if (this.errorQueue.length >= maxErrors) {
+      this.errorQueue.shift();
+    }
+    this.errorQueue.push(normalized);
+
+    // 异步进行 SourceMap 解析，解析完成后更新队列中的错误
+    const processError = async () => {
+      try {
+        const parsed = await this.sourceMapParser.parseStackTrace(
+          normalized,
+          this.sourceMaps.length > 0 ? this.sourceMaps : undefined
+        );
+        // 找到队列中的错误并更新（如果还在队列中）
+        const index = this.errorQueue.findIndex(e => e.id === normalized.id);
+        if (index !== -1) {
+          this.errorQueue[index] = { ...parsed, id: normalized.id };
+        }
+      } catch (err) {
+        console.error('Failed to parse error stack trace:', err);
+        // 错误已经在队列中，无需额外处理
+      }
+    };
+
+    // 异步执行，不阻塞
+    void processError();
+
+    // 如果启用自动上报，则在错误添加后自动上报
+    if (this.config.autoReport) {
+      // 使用 setTimeout 确保在当前事件循环结束后上报，避免阻塞
+      setTimeout(() => {
+        this.report();
+      }, 0);
+    }
+  }
+
+  /**
+   * 手动捕获并上报错误
+   * @param error Error 对象或 ErrorInfo 对象
+   */
+  public captureError(error: Error | ErrorInfo) {
+    if (error instanceof Error) {
+      const errorInfo: ErrorInfo = {
+        message: error.message,
+        stack: error.stack,
+        type: 'js',
+        timestamp: Date.now(),
+        url: window.location.href,
+        userAgent: navigator.userAgent,
+        version: this.config.version,
+      };
+      this.addError(errorInfo);
+    } else {
+      this.addError(error);
+    }
   }
 
   /**
@@ -234,25 +314,31 @@ export class Monitor {
    * 汇总错误、性能与行为数据并发送到服务端
    */
   public async report() {
-    if (this.errorQueue.length === 0 && !this.performanceMetrics) return;
+    // 检查是否有任何数据需要上报
+    if (this.errorQueue.length === 0 && !this.performanceMetrics && this.actionQueue.length === 0) return;
+
+    // 复制当前队列数据，避免发送过程中被修改
+    const errors = [...this.errorQueue];
+    const actions = [...this.actionQueue];
+    const performance = this.performanceMetrics;
+
+    // 立即清空队列，允许新数据继续收集
+    this.errorQueue = [];
+    this.actionQueue = [];
+    this.performanceMetrics = undefined;
 
     const data: ReportData = {
       projectId: this.config.projectId,
-      errors: this.errorQueue.length > 0 ? this.errorQueue : undefined,
-      performance: this.performanceMetrics,
-      actions: this.actionQueue.length > 0 ? this.actionQueue : undefined,
+      errors: errors.length > 0 ? errors : undefined,
+      performance: performance,
+      actions: actions.length > 0 ? actions : undefined,
     };
-    console.log(data, 'data');
-    const url = `${this.config.reportUrl}/api/jkq`;
-    const payload = this.config.enableCompression ? compress(data) : JSON.stringify(data);
+    const url = `${this.config.reportUrl}/api/report`;
+    const payload = JSON.stringify(data);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
 
-    // if (this.config.enableCompression) {
-    //   headers['Content-Encoding'] = 'base64';
-    // }
-    console.log(url, 'urlurlurlurlurlurlurlurlurlurl', payload);
     const sendReport = async () => {
       const response = await fetch(url, {
         method: 'POST',
@@ -263,7 +349,6 @@ export class Monitor {
       if (!response.ok) {
         throw new Error(`Report failed: ${response.status}`);
       }
-
       return response;
     };
 
@@ -273,12 +358,14 @@ export class Monitor {
       } else {
         await sendReport();
       }
-
-      this.errorQueue = [];
-      this.actionQueue = [];
-      this.performanceMetrics = undefined;
     } catch (error) {
       console.error('Failed to send report after retries:', error);
+      // 上报失败时，将数据放回队列
+      this.errorQueue.unshift(...errors);
+      this.actionQueue.unshift(...actions);
+      if (performance) {
+        this.performanceMetrics = performance;
+      }
     }
   }
 }

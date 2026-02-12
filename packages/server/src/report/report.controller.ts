@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { ReportService } from './report.service';
 
 /**
@@ -17,11 +18,10 @@ export class ReportController {
   /**
    * 简单的测试接口，用于验证网关/反向代理是否将请求正确转发到服务端。
    */
-  @Get('report')
+  @Post('report')
   async createReport(@Body() reportData: any) {
-    console.log(reportData, 'reportData');
-    return reportData;
-    //return this.reportService.create(reportData);
+    console.log(reportData, 'reportData12');
+    return this.reportService.create(reportData);
   }
 
   /**
@@ -70,8 +70,15 @@ export class ReportController {
    * 根据项目 ID 查询最近的报告，供 Dashboard 构建列表/趋势图。
    */
   @Get('reports/:projectId')
-  async getReports(@Param('projectId') projectId: string) {
-    const data = await this.reportService.findByProject(projectId);
-    return { data };
+  async getReports(
+    @Param('projectId') projectId: string,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    console.log(projectId, 'projectId');
+
+    const result = await this.reportService.findByProject(projectId);
+    res.header('X-Report-Count', result.data.length.toString());
+    res.header('Content-Type', 'application/json');
+    return result;
   }
 }

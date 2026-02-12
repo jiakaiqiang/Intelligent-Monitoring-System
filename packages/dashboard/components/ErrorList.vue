@@ -1,194 +1,276 @@
 <template>
-  <div v-if="source" :style="{
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0, 0, 0, 0.8)',
-    zIndex: 9999,
-    padding: '20px',
-    display: 'flex',
-    flexDirection: 'column'
-  }">
-    <!-- 头部工具栏 -->
-    <div :style="{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }">
-      <h3 :style="{ color: 'white', margin: 0 }">Source Code Viewer</h3>
-      <div>
-        <button
-          @close="closeViewer"
-          :style="{
-            background: '#ff4d4f',
-            color: 'white',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            marginRight: '10px'
-          }"
-        >
-          Close
-        </button>
-      </div>
+  <div class="error-list-container">
+    <!-- 筛选区域 -->
+    <div class="filter-bar">
+      <el-input
+        v-model="projectId"
+        placeholder="输入项目 ID"
+        style="width: 200px; margin-right: 12px"
+      />
+      <el-button type="primary" @click="fetchErrors" :loading="loading">
+        查询
+      </el-button>
+      <el-button @click="refreshErrors" :loading="loading">
+        刷新
+      </el-button>
     </div>
 
-    <!-- 文件信息 -->
-    <div :style="{ background: '#1e1e1e', padding: '10px 20px', marginBottom: '10px', borderRadius: '4px' }">
-      <div :style="{ display: 'flex', alignItems: 'center', gap: '20px' }">
-        <span :style="{ color: '#ccc' }">📄 {{ source.fileName }}</span>
-        <span v-if="lineNumber" :style="{ color: '#ccc' }">Line: {{ lineNumber }}</span>
-        <span v-if="columnNumber" :style="{ color: '#ccc' }">Column: {{ columnNumber }}</span>
-      </div>
+    <!-- 类型筛选标签 -->
+    <div class="type-filter">
+      <span style="margin-right: 8px">类型筛选:</span>
+      <el-tag
+        v-for="type in errorTypes"
+        :key="type.value"
+        :type="selectedType === type.value ? '' : 'info'"
+        :effect="selectedType === type.value ? 'dark' : 'plain'"
+        style="margin-right: 8px; cursor: pointer"
+        @click="filterByType(type.value)"
+      >
+        {{ type.label }}
+      </el-tag>
     </div>
 
-    <!-- 源码查看器 -->
-    <div :style="{
-      flex: 1,
-      background: '#1e1e1e',
-      borderRadius: '4px',
-      overflow: 'hidden',
-      display: 'flex',
-      flexDirection: 'column'
-    }">
-      <!-- 行号栏 -->
-      <div :style="{
-        background: '#2d2d2d',
-        padding: '10px 10px 0 10px',
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        color: '#858585',
-        lineHeight: '1.6',
-        float: 'left',
-        width: '60px',
-        textAlign: 'right',
-        marginRight: '10px',
-        userSelect: 'none'
-      }">
-        <div v-for="(_, index) in lineCount" :key="index" :style="{ lineHeight: '1.6' }">
-          {{ index + 1 }}
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-container">
+      <el-icon class="is-loading"><Loading /></el-icon>
+      <span>加载中...</span>
+    </div>
+
+    <!-- 空状态 -->
+    <el-empty v-else-if="filteredErrors.length === 0" description="暂无异常数据" />
+
+    <!-- 异常列表 -->
+    <el-collapse v-else v-model="activeNames" class="error-collapse">
+      <el-collapse-item
+        v-for="(error, index) in filteredErrors"
+        :key="index"
+        :name="index"
+      >
+        <template #title>
+          <div class="error-header">
+            <el-tag :type="getTagType(error.type)" size="small">
+              {{ getTypeLabel(error.type) }}
+            </el-tag>
+            <span class="error-message">{{ error.message }}</span>
+            <span class="error-time">
+              {{ formatTime(error.timestamp) }}
+            </span>
+            <el-tag v-if="error.version" type="info" size="small" effect="plain">
+              v{{ error.version }}
+            </el-tag>
+          </div>
+        </template>
+
+        <div class="error-detail">
+          <div class="detail-row">
+            <span class="label">URL:</span>
+            <span class="value">{{ error.url }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">User Agent:</span>
+            <span class="value">{{ error.userAgent }}</span>
+          </div>
+          <div v-if="error.stack" class="detail-row stack-trace">
+            <span class="label">Stack Trace:</span>
+            <pre class="stack-content">{{ error.stack }}</pre>
+          </div>
         </div>
-      </div>
-
-      <!-- 代码栏 -->
-      <div :style="{
-        flex: 1,
-        padding: '10px 0 10px 70px',
-        overflow: 'auto',
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        lineHeight: '1.6',
-        color: 'white'
-      }">
-        <pre>{{ source.content }}</pre>
-
-        <!-- 高亮行 -->
-        <div
-          v-if="lineNumber"
-          :style="{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            height: '1.6em',
-            background: 'rgba(255, 77, 79, 0.1)',
-            borderLeft: '3px solid #ff4d4f',
-            pointerEvents: 'none',
-             top: `${(lineNumber - 1) * 1.6 + 10}px`,
-            marginLeft: '70px'
-          }"
-         
-        ></div>
-      </div>
-    </div>
-
-    <!-- 底部工具栏 -->
-    <div :style="{ marginTop: '10px', display: 'flex', gap: '10px' }">
-      <button
-        @copySource="copySource"
-        :style="{
-          background: '#1890ff',
-          color: 'white',
-          border: 'none',
-          padding: '8px 16px',
-          borderRadius: '4px',
-          cursor: 'pointer'
-        }"
-      >
-        Copy Source
-      </button>
-
-      <button
-        @downloadSource="downloadSource"
-        :style="{
-          background: '#52c41a',
-          color: 'white',
-          border: 'none',
-          padding: '8px 16px',
-          borderRadius: '4px',
-          cursor: 'pointer'
-        }"
-      >
-        Download
-      </button>
-    </div>
+      </el-collapse-item>
+    </el-collapse>
   </div>
 </template>
 
 <script setup lang="ts">
-import {computed} from 'vue'
-interface SourceFile {
-  fileName: string;
-  content: string;
-}
+import { ref, computed, onMounted } from 'vue';
+import { Loading } from '@element-plus/icons-vue';
+import type { ErrorInfo } from '@monitor/shared/types';
 
-interface Props {
-  source: SourceFile | null;
-  lineNumber?: number;
-  columnNumber?: number;
-}
+const projectId = ref('default');
+const errors = ref<ErrorInfo[]>([]);
+const loading = ref(false);
+const activeNames = ref<number[]>([]);
+const selectedType = ref<string>('all');
 
-const props = withDefaults(defineProps<Props>(), {
-  lineNumber: 0,
-  columnNumber: 0
+const errorTypes = [
+  { value: 'all', label: '全部' },
+  { value: 'js', label: 'JavaScript' },
+  { value: 'promise', label: 'Promise' },
+  { value: 'resource', label: 'Resource' },
+];
+
+const filteredErrors = computed(() => {
+  if (selectedType.value === 'all') {
+    return errors.value;
+  }
+  return errors.value.filter((e) => e.type === selectedType.value);
 });
 
-const emit = defineEmits(['close', 'copy', 'download']);
+const fetchErrors = async () => {
+  if (!projectId.value) return;
 
-// 计算行数
-const lineCount = computed(() => {
-  if (!props.source) return 0;
-  return props.source.content.split('\n').length;
-});
-
-// 关闭查看器
-const closeViewer = () => {
-  emit('close');
-};
-
-// 复制源码
-const copySource = () => {
-  if (props.source) {
-    navigator.clipboard.writeText(props.source.content)
-      .then(() => {
-        alert('Source code copied to clipboard!');
-      })
-      .catch(err => {
-        console.error('Failed to copy:', err);
+  loading.value = true;
+  try {
+    const response = await fetch(`http://10.173.26.56:3000/api/reports/${projectId.value}`,{
+      method:'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+  
+    const result = await response.json();
+    console.log(result, 'result');
+    // 从返回数据中提取所有错误
+    const allErrors: ErrorInfo[] = [];
+    if (Array.isArray(result.data)) {
+      result.data.forEach((report: any) => {
+        if (report.errorLogs && Array.isArray(report.errorLogs)) {
+          allErrors.push(...report.errorLogs);
+        }
       });
+    }
+
+    // 按时间倒序排列
+    errors.value = allErrors.sort((a, b) => b.timestamp - a.timestamp);
+  } catch (err) {
+    console.error('获取异常数据失败:', err);
+    errors.value = [];
+  } finally {
+    loading.value = false;
   }
 };
 
-// 下载源码
-const downloadSource = () => {
-  if (props.source) {
-    const blob = new Blob([props.source.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = props.source.fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+const refreshErrors = () => {
+  fetchErrors();
+};
+
+const filterByType = (type: string) => {
+  selectedType.value = type;
+};
+
+const getTagType = (type: string): '' | 'success' | 'warning' | 'info' | 'danger' => {
+  switch (type) {
+    case 'js':
+      return 'danger';
+    case 'promise':
+      return 'warning';
+    case 'resource':
+      return 'info';
+    default:
+      return '';
   }
 };
+
+const getTypeLabel = (type: string): string => {
+  const found = errorTypes.find((t) => t.value === type);
+  return found ? found.label : type;
+};
+
+const formatTime = (timestamp: number): string => {
+  return new Date(timestamp).toLocaleString();
+};
+
+onMounted(() => {
+  fetchErrors();
+});
 </script>
+
+<style scoped>
+.error-list-container {
+  padding: 20px;
+}
+
+.filter-bar {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.type-filter {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #909399;
+}
+
+.loading-container .el-icon {
+  margin-right: 8px;
+  font-size: 20px;
+}
+
+.error-collapse {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+}
+
+.error-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.error-message {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #303133;
+}
+
+.error-time {
+  color: #909399;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.error-detail {
+  padding: 12px;
+  background: #fafafa;
+  border-radius: 4px;
+}
+
+.detail-row {
+  margin-bottom: 8px;
+  display: flex;
+}
+
+.detail-row .label {
+  width: 100px;
+  flex-shrink: 0;
+  color: #606266;
+  font-weight: 500;
+}
+
+.detail-row .value {
+  flex: 1;
+  word-break: break-all;
+  color: #303133;
+}
+
+.stack-trace {
+  flex-direction: column;
+}
+
+.stack-trace .label {
+  margin-bottom: 8px;
+}
+
+.stack-content {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+</style>

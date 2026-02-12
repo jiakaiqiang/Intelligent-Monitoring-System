@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as compression from 'compression';
+import { Request, Response, NextFunction } from 'express';
 import { CompressionInterceptor } from './filter/compression.filter';
 import { HttpExceptionFilter } from './filter/http-exception.filter';
 
@@ -22,11 +23,18 @@ async function bootstrap() {
   // 启用响应压缩中间件，减少网络传输数据量
   app.use(compression());
 
+  // 统一设置响应头为 JSON，确保所有接口返回格式一致
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.type('application/json');
+    next();
+  });
+
   // 配置跨域资源共享(CORS)，允许前端应用访问后端API
   app.enableCors({
     origin: process.env.CORS_ORIGIN || '*', // 允许的源域名
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // 允许的HTTP方法
     allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Accept'], // 允许的请求头
+    exposedHeaders: ['X-Report-Count'], // 前端可以访问的自定义响应头
     credentials: true, // 是否允许携带凭证信息
     maxAge: 86400, // 预检请求缓存时间(秒)
   });

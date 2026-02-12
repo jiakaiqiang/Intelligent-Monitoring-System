@@ -6,7 +6,7 @@ const metrics = ref<PerformanceMetrics[]>([]);
 const avgMetrics = ref<Partial<PerformanceMetrics>>({});
 
 onMounted(() => {
-  fetch('/api/reports/demo-project')
+  fetch('http://10.173.26.56:3000/api/reports/performance')
     .then((res) => res.json())
     .then((data) => {
       const perfData = data.data

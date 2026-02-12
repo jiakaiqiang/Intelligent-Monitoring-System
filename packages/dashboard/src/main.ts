@@ -1,5 +1,10 @@
 import { createApp } from 'vue';
+import ElementPlus from 'element-plus';
+import 'element-plus/dist/index.css';
+import './styles/theme.css';
 import App from './App.vue';
 
-// Vue 应用入口：创建根实例并挂载到 Vite 注入的 #app 容器。
-createApp(App).mount('#app');
+const app = createApp(App);
+
+app.use(ElementPlus);
+app.mount('#app');

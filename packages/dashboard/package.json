@@ -8,7 +8,9 @@
     "lint": "eslint . --ext .ts,.vue"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
     "@monitor/shared": "workspace:*",
+    "element-plus": "^2.13.2",
     "vue": "^3.5.13"
   },
   "devDependencies": {
