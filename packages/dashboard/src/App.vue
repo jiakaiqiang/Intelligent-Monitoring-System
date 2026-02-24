@@ -7,7 +7,7 @@ type View = 'errors' | 'performance';
 
 const currentView = ref<View>('errors');
 const currentTime = ref(new Date());
-const systemStatus = ref('ONLINE');
+const systemStatus = ref('在线');
 
 // Update time every second
 onMounted(() => {
@@ -17,7 +17,7 @@ onMounted(() => {
 });
 
 const formattedTime = computed(() => {
-  return currentTime.value.toLocaleTimeString('en-US', {
+  return currentTime.value.toLocaleTimeString('zh-CN', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
@@ -26,11 +26,11 @@ const formattedTime = computed(() => {
 });
 
 const formattedDate = computed(() => {
-  return currentTime.value.toLocaleDateString('en-US', {
+  return currentTime.value.toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: 'short',
     day: '2-digit'
-  }).toUpperCase();
+  });
 });
 </script>
 
@@ -52,8 +52,8 @@ const formattedDate = computed(() => {
             </svg>
           </div>
           <div class="nx-logo__text">
-            <span class="nx-logo__title">NEXUS</span>
-            <span class="nx-logo__subtitle">MONITOR SYSTEM</span>
+            <span class="nx-logo__title">神经枢纽</span>
+            <span class="nx-logo__subtitle">监控系统</span>
           </div>
         </div>
       </div>
@@ -66,7 +66,7 @@ const formattedDate = computed(() => {
             @click="currentView = 'errors'"
           >
             <span class="nx-nav__icon">⚠</span>
-            <span class="nx-nav__label">ERROR_LOG</span>
+            <span class="nx-nav__label">错误日志</span>
             <span class="nx-nav__indicator"></span>
           </button>
           <button
@@ -75,7 +75,7 @@ const formattedDate = computed(() => {
             @click="currentView = 'performance'"
           >
             <span class="nx-nav__icon">◈</span>
-            <span class="nx-nav__label">PERF_METRICS</span>
+            <span class="nx-nav__label">性能指标</span>
             <span class="nx-nav__indicator"></span>
           </button>
         </nav>
@@ -84,7 +84,7 @@ const formattedDate = computed(() => {
       <div class="nx-header__right">
         <div class="nx-status-panel">
           <div class="nx-status-panel__item">
-            <span class="nx-status-panel__label">SYS_STATUS</span>
+            <span class="nx-status-panel__label">系统状态</span>
             <span class="nx-status-panel__value nx-status-panel__value--online">
               <span class="nx-pulse"></span>
               {{ systemStatus }}
@@ -112,7 +112,7 @@ const formattedDate = computed(() => {
     <!-- Footer -->
     <footer class="nx-footer">
       <div class="nx-footer__left">
-        <span class="nx-footer__text">NEXUS_MONITOR v2.0.0</span>
+        <span class="nx-footer__text">神经枢纽监控 v2.0.0</span>
       </div>
       <div class="nx-footer__center">
         <div class="nx-data-stream">
@@ -120,7 +120,7 @@ const formattedDate = computed(() => {
         </div>
       </div>
       <div class="nx-footer__right">
-        <span class="nx-footer__text">SECURE_CONNECTION::ESTABLISHED</span>
+        <span class="nx-footer__text">安全连接已建立</span>
       </div>
     </footer>
   </div>

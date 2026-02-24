@@ -25,7 +25,7 @@ export class ReportService {
    * 将上报的数据落库，并预留钩子触发异步分析（队列/AI）。
    */
   async create(reportData: any): Promise<ReportEntity> {
-    console.log(reportData, 'reportData');
+
     const report = this.reportRepository.create({
       projectId: reportData.projectId,
       errorLogs: reportData.errors ?? reportData.errorLogs ?? null,
@@ -72,7 +72,7 @@ export class ReportService {
         {
           const list = dataList.filter((item) => item.performance);
           console.log(list ,'wefwfe')
-          responseList = list.length > 0 ? [list.pop()] : [];
+          responseList = list.length > 0 ? [list.shift()] : [];
         }
         break;
       case 'default':
