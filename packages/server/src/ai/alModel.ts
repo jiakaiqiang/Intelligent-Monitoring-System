@@ -11,15 +11,17 @@ export const AI_MODEL = 'gpt-4';
 export const modelAnalysis = async (content: string) => {
   console.log(content, 'content');
   const body = JSON.stringify({
-    model: 'gpt-4',
+    model: 'z-ai/glm-4.7',
+    group: 'default',
+    stream: true,
     messages: [
       {
-        role: 'system',
+        role: 'user',
         content: content,
       },
     ],
   });
-  await handleModelAnalysis(JSON.parse(body));
+  return handleModelAnalysis(body);
 };
 
 /**
@@ -29,21 +31,70 @@ export const modelAnalysis = async (content: string) => {
  * 注意：此处包含密钥，生产环境请改为读取安全存储并增加错误处理/重试。
  */
 export const handleModelAnalysis = async (body: any) => {
-  return new Promise((resolve, reject) => {
-    fetch('https://docs.newapi.pro/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer sk-f1uUJ5NAKjVzzpM6eX6ul23Y0R1MBCMMAEG1cFvpnPoLhJaY',
-      },
-      body: JSON.stringify(body),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        resolve(data);
-      })
-      .catch((err) => {
-        reject(err);
-      });
+  console.log(body, 'body');
+  const response = await fetch('https://runanytime.hxi.me/v1/messages', {
+    method: 'POST',
+    headers: {
+      
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer sk-eY27WVQJy3Ysf3MVtbdt78DVVWp3lVF5rkicPARi375AOaWi',
+    },
+    body,
   });
+
+  if (!response.ok) {
+    const errorPayload = await response.text();
+    throw new Error(`模型调用失败：${response.status} ${errorPayload}`);
+  }
+
+  if (!response.body) {
+    return response.text();
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const segments = buffer.split('\n\n');
+    buffer = segments.pop() || '';
+
+    for (const segment of segments) {
+      const line = segment.trim();
+      if (!line.startsWith('data:')) {
+        continue;
+      }
+
+      const payload = line.replace(/^data:\s*/, '');
+      if (!payload || payload === '[DONE]') {
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(payload);
+        const delta = parsed?.choices?.[0]?.delta?.content || '';
+        content += delta;
+      } catch (error) {
+        console.error('解析流数据失败', error);
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    try {
+      const payload = buffer.replace(/^data:\s*/, '');
+      const parsed = JSON.parse(payload);
+      content += parsed?.choices?.[0]?.delta?.content || '';
+    } catch (error) {
+      console.error('解析剩余流数据失败', error);
+    }
+  }
+
+  return content;
 };
