@@ -11,7 +11,7 @@ export const AI_MODEL = 'gpt-4';
 export const modelAnalysis = async (content: string) => {
   console.log(content, 'content');
   const body = JSON.stringify({
-    model: 'z-ai/glm-4.7',
+    model: 'deepseek-v3',
     group: 'default',
     stream: true,
     messages: [
@@ -32,12 +32,12 @@ export const modelAnalysis = async (content: string) => {
  */
 export const handleModelAnalysis = async (body: any) => {
   console.log(body, 'body');
-  const response = await fetch('https://runanytime.hxi.me/v1/messages', {
+  const response = await fetch('https://ai.huan666.de/v1/chat/completions', {
     method: 'POST',
     headers: {
       
       'Content-Type': 'application/json',
-      Authorization: 'Bearer sk-eY27WVQJy3Ysf3MVtbdt78DVVWp3lVF5rkicPARi375AOaWi',
+      Authorization: 'Bearer sk-YgKDdUm8YjvgDJLsw08FuhxnlWAXIyUSfJEXGjZ16fuAD7bq',
     },
     body,
   });

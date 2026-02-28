@@ -63,14 +63,17 @@
     </div>
 
     <!-- 错误列表 -->
-    <div v-else class="error-stream">
-      <div
+    
+      <div  v-else style="height:490px;overflow: auto;">
+       <div  class="error-stream">
+         <div
+
         v-for="(error, index) in filteredErrors"
         :key="index"
         class="error-card"
         :class="{
           'error-card--expanded': activeError === index,
-          [`error-card--${error.type}`]: true
+          [`error-card--${error.type}`]: true,
         }"
         @click="toggleError(index)"
       >
@@ -81,15 +84,23 @@
               <span class="badge-icon">{{ getTypeIcon(error.type) }}</span>
               <span>{{ getTypeName(error.type) }}</span>
             </div>
-            <div class="error-version" v-if="error.version">
-              v{{ error.version }}
-            </div>
+            <div class="error-version" v-if="error.version">v{{ error.version }}</div>
           </div>
           <div class="error-message">
             {{ error.message }}
           </div>
           <div class="error-timestamp">
             {{ formatErrorTime(error.timestamp) }}
+          </div>
+          <div class="error-actions">
+            <button
+              class="ai-analysis-btn"
+              :disabled="isAnalyzingIndex(index)"
+              @click.stop="handleAiAnalysis(error, index)"
+            >
+              <span v-if="isAnalyzingIndex(index)" class="ai-analysis-btn__spinner"></span>
+              <span v-else>AI 分析</span>
+            </button>
           </div>
           <div class="error-expand">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -103,7 +114,7 @@
           <div class="detail-section">
             <div class="detail-label">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M8 1v14M1 8h14"/>
+                <path d="M8 1v14M1 8h14" />
               </svg>
               网址
             </div>
@@ -113,7 +124,7 @@
           <div class="detail-section">
             <div class="detail-label">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M4 4h8v8a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
+                <path d="M4 4h8v8a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
               </svg>
               用户代理
             </div>
@@ -123,8 +134,8 @@
           <div v-if="error.stack" class="detail-section detail-section--stack">
             <div class="detail-label">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M2 4v10h12M4 6l2 2 2-2"/>
-                <path d="M4 10l2 2 2-2"/>
+                <path d="M2 4v10h12M4 6l2 2 2-2" />
+                <path d="M4 10l2 2 2-2" />
               </svg>
               堆栈跟踪
             </div>
@@ -132,6 +143,8 @@
           </div>
         </div>
       </div>
+      </div>
+     
     </div>
   </div>
 </template>
@@ -139,12 +152,29 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import type { ErrorInfo } from '@monitor/shared/types';
+let showScroll =  ref(null)
 
+
+const props = withDefaults(
+  defineProps<{
+    aiAnalyzingIndex?: number | null;
+  }>(),
+  {
+    aiAnalyzingIndex: null,
+  }
+);
+
+const emit = defineEmits<{
+  (e: 'request-ai-analysis', payload: { error: ErrorInfo; index: number; projectId: string }): void;
+}>();
+
+const API_BASE_URL = import.meta.env.VITE_MONITOR_API ?? 'http://10.173.26.56:3000';
 const projectId = ref('default');
 const errors = ref<ErrorInfo[]>([]);
 const loading = ref(false);
 const activeError = ref<number | null>(null);
 const selectedType = ref<string>('all');
+const aiAnalyzingIndex = computed(() => props.aiAnalyzingIndex ?? null);
 
 const errorTypes = [
   { value: 'all', label: '全部' },
@@ -165,8 +195,8 @@ const fetchErrors = async () => {
 
   loading.value = true;
   try {
-    const response = await fetch(`http://10.173.26.56:3000/api/reports/${projectId.value}`,{
-      method:'GET',
+    const response = await fetch(`${API_BASE_URL}/api/reports/${projectId.value}`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -205,21 +235,39 @@ const toggleError = (index: number) => {
   activeError.value = activeError.value === index ? null : index;
 };
 
+const handleAiAnalysis = (error: ErrorInfo, index: number) => {
+  emit('request-ai-analysis', {
+    error,
+    index,
+    projectId: projectId.value,
+  });
+};
+
+const isAnalyzingIndex = (index: number) => aiAnalyzingIndex.value === index;
+
 const getTypeIcon = (type: string): string => {
   switch (type) {
-    case 'js': return '';
-    case 'promise': return '◇';
-    case 'resource': return '◉';
-    default: return '●';
+    case 'js':
+      return '';
+    case 'promise':
+      return '◇';
+    case 'resource':
+      return '◉';
+    default:
+      return '●';
   }
 };
 
 const getTypeName = (type: string): string => {
   switch (type) {
-    case 'js': return 'JS错误';
-    case 'promise': return 'Promise';
-    case 'resource': return '资源';
-    default: return type.toUpperCase();
+    case 'js':
+      return 'JS错误';
+    case 'promise':
+      return 'Promise';
+    case 'resource':
+      return '资源';
+    default:
+      return type.toUpperCase();
   }
 };
 
@@ -257,12 +305,13 @@ const formatErrorTime = (timestamp: number): string => {
     month: 'short',
     day: '2-digit',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 };
 
 onMounted(() => {
   fetchErrors();
+ 
 });
 </script>
 
@@ -505,7 +554,9 @@ onMounted(() => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Loading State */
@@ -516,6 +567,8 @@ onMounted(() => {
   justify-content: center;
   padding: var(--space-2xl);
   gap: var(--space-md);
+  flex: 1;
+  min-height: 0;
 }
 
 .loading-ring {
@@ -547,6 +600,8 @@ onMounted(() => {
   gap: var(--space-sm);
   background: var(--nx-surface);
   border: 1px dashed var(--nx-border);
+  flex: 1;
+  min-height: 0;
 }
 
 .empty-icon {
@@ -574,6 +629,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+
 }
 
 /* Error Card */
@@ -584,6 +640,7 @@ onMounted(() => {
   transition: all var(--transition-normal);
   position: relative;
   overflow: hidden;
+  
 }
 
 .error-card::before {
@@ -654,11 +711,51 @@ onMounted(() => {
 /* Error Card Header */
 .error-card__header {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto;
   gap: var(--space-md);
   align-items: center;
   padding: var(--space-md) var(--space-lg);
   min-height: 56px;
+}
+
+.error-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ai-analysis-btn {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--nx-border);
+  color: var(--nx-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.ai-analysis-btn:hover:not(:disabled) {
+  border-color: var(--nx-cyan);
+  box-shadow: 0 0 10px var(--nx-cyan-glow);
+}
+
+.ai-analysis-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ai-analysis-btn__spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
 .error-meta {
