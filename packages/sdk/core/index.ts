@@ -65,7 +65,16 @@ export class Monitor {
    * 已上传的 SourceMap 文件信息数组
    * 存储格式包含文件名、URL和版本号
    */
+  /**
+   * 已上传的 SourceMap 文件信息数组
+   * 存储格式包含文件名、URL和版本号
+   */
   private sourceMaps: Array<{ filename: string; content: string; version?: string }> = [];
+
+  /**
+   * 已上传的 SourceMap 文件名集合，用于避免重复上传
+   */
+  private uploadedSourceMapFiles = new Set<string>();
 
   /**
    * Monitor 类构造函数
@@ -229,7 +238,12 @@ export class Monitor {
         // 错误已经在队列中，无需额外处理
       }
     };
+    // 异步执行，不阻塞
+    void processError();
 
+    // 自动上传未上传的 SourceMap 到服务端
+    this.uploadPendingSourceMaps();
+    
     // 异步执行，不阻塞
     void processError();
 
@@ -241,6 +255,73 @@ export class Monitor {
       }, 0);
     }
   }
+
+  /**
+   * 自动上传未上报的 SourceMap 到服务端
+   * 避免重复上传已存在的文件
+   */
+  private async uploadPendingSourceMaps() {
+    //模拟手动出发sourcemap 上传 
+    function triggerSourceMapUpload() {
+     
+    }
+
+    if (this.sourceMaps.length === 0) {
+      return;
+    }
+
+    const uploadPromises: Promise<void>[] = [];
+
+    for (const sourceMapInfo of this.sourceMaps) {
+      // 生成唯一的 key 用于去重
+      const key = `${sourceMapInfo.version || 'unknown'}-${sourceMapInfo.filename}`;
+
+      // 如果已经上传过，跳过
+      if (this.uploadedSourceMapFiles.has(key)) {
+        continue;
+      }
+
+      // 标记为已上传
+      this.uploadedSourceMapFiles.add(key);
+
+      // 创建上传任务
+      const uploadPromise = (async () => {
+        try {
+          // 将 content 转换为 Blob 作为 File 对象
+          const base64 = sourceMapInfo.content;
+          const binaryString = atob(base64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: 'application/json' });
+          const file = new File([blob], sourceMapInfo.filename, { type: 'application/json' });
+
+          await this.sourceMapUploader.uploadSourceMap(
+            file,
+            sourceMapInfo.filename,
+            sourceMapInfo.version
+          );
+          console.log(`Auto-uploaded SourceMap: ${sourceMapInfo.filename}`);
+        } catch (error) {
+          console.error(`Failed to auto-upload SourceMap: ${sourceMapInfo.filename}`, error);
+          // 上传失败时移除标记，允许重试
+          this.uploadedSourceMapFiles.delete(key);
+        }
+      })();
+
+      uploadPromises.push(uploadPromise);
+    }
+
+    // 并行上传，但不等待完成
+    if (uploadPromises.length > 0) {
+      Promise.all(uploadPromises).catch(() => {
+        // 忽略错误，已在内部处理
+      });
+    }
+  }
+
+  /**
 
   /**
    * 手动捕获并上报错误
@@ -332,6 +413,7 @@ export class Monitor {
       errors: errors.length > 0 ? errors : undefined,
       performance: performance,
       actions: actions.length > 0 ? actions : undefined,
+      sourceMaps: this.sourceMaps.length > 0 ? this.sourceMaps : undefined,
     };
     const url = `${this.config.reportUrl}/api/report`;
     const payload = JSON.stringify(data);

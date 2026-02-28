@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, Param, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { ReportService } from './report.service';
+import { SourceMapService } from '../sourcemap/sourcemap.service';
 
 /**
  * ReportController
@@ -13,7 +14,10 @@ import { ReportService } from './report.service';
  */
 @Controller('api')
 export class ReportController {
-  constructor(private readonly reportService: ReportService) {}
+  constructor(
+    private readonly reportService: ReportService,
+    private readonly sourceMapService: SourceMapService
+  ) {}
 
   /**
    * 简单的测试接口，用于验证网关/反向代理是否将请求正确转发到服务端。
@@ -34,17 +38,27 @@ export class ReportController {
 
   /**
    * SDK 上报入口：
-   * 1. 动态加载 ErrorMappingService 进行 SourceMap 映射；
-   * 2. 将映射结果合并到报告数据后交给 ReportService 持久化；
-   * 3. 若映射失败则兜底保存原始 payload。
+   * 1. 如果上报包含 sourceMaps，先保存到 sourcemaps 表；
+   * 2. 动态加载 ErrorMappingService 进行 SourceMap 映射；
+   * 3. 将映射结果合并到报告数据后交给 ReportService 持久化；
+   * 4. 若映射失败则兜底保存原始 payload。
    */
   @Post('jkq')
   async createJkq(@Body() jkqData: any) {
     console.log(jkqData, 'jkqData', this.reportService);
 
     try {
+      // 如果上报包含 sourceMaps，先保存到数据库
+      if (jkqData.sourceMaps && jkqData.sourceMaps.length > 0) {
+        await this.sourceMapService.create(jkqData.projectId, jkqData.sourceMaps);
+        console.log(`Saved ${jkqData.sourceMaps.length} sourceMaps to database`);
+      }
+
       const { ErrorMappingService } = await import('../error-mapping/error-mapping.service');
-      const errorMappingService = new ErrorMappingService(this.reportService, {} as any);
+      const errorMappingService = new ErrorMappingService(
+        this.reportService,
+        this.sourceMapService
+      );
 
       const processed = await errorMappingService.processReport({
         projectId: jkqData.projectId,

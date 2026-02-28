@@ -27,7 +27,7 @@
   <h1>Monitor SDK Demo</h1>
     <button @click="triggerError">Trigger Error</button>
     <button @click="promiseBtn">Trigger Promise Error</button>
-    <img src="./assets/logo1.png" alt="logo" class="logo vue" />
+ 
 </template>
 
 <style scoped>
