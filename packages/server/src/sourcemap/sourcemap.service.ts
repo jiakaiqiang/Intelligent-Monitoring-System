@@ -10,6 +10,36 @@ export interface SourceMapQuery {
   filename?: string;
 }
 
+export interface SourceSnippetQuery {
+  projectId: string;
+  file: string;
+  version?: string;
+  line?: number;
+  column?: number;
+  context?: number;
+}
+
+export interface SourceSnippet {
+  sourceFile: string;
+  generatedFile?: string;
+  version: string;
+  line?: number;
+  column?: number;
+  startLine: number;
+  endLine: number;
+  content: string;
+  snippet: Array<{
+    line: number;
+    content: string;
+    highlighted: boolean;
+  }>;
+  sourcemap: {
+    id: string;
+    filename: string;
+    uploadedAt: Date;
+  };
+}
+
 @Injectable()
 export class SourceMapService {
   constructor(
@@ -353,6 +383,149 @@ export class SourceMapService {
     }
   }
 
+  async getSourceSnippet(query: SourceSnippetQuery): Promise<SourceSnippet | null> {
+    const context = Math.max(0, Math.min(query.context ?? 8, 30));
+    const candidates = await this.findSourceMapCandidates(query.projectId, query.version);
+    const requestedFile = this.normalizePath(query.file);
+
+    for (const sourceMapDoc of candidates) {
+      try {
+        const mapContent = this.decodeBase64(sourceMapDoc.content);
+        const map = JSON.parse(mapContent) as sourceMap.RawSourceMap;
+        const consumer = await new sourceMap.SourceMapConsumer(map);
+
+        try {
+          const resolved = this.resolveOriginalSource(
+            consumer,
+            requestedFile,
+            query.line,
+            query.column
+          );
+
+          if (!resolved?.source) {
+            continue;
+          }
+
+          const sourceContent = consumer.sourceContentFor(resolved.source, true);
+          if (!sourceContent) {
+            continue;
+          }
+
+          const targetLine = resolved.line ?? query.line ?? 1;
+          const snippet = this.buildSnippet(sourceContent, targetLine, context);
+
+          return {
+            sourceFile: resolved.source,
+            generatedFile: query.file,
+            version: sourceMapDoc.version,
+            line: targetLine,
+            column: resolved.column ?? query.column,
+            startLine: snippet.startLine,
+            endLine: snippet.endLine,
+            content: sourceContent,
+            snippet: snippet.lines,
+            sourcemap: {
+              id: sourceMapDoc.id,
+              filename: sourceMapDoc.filename,
+              uploadedAt: sourceMapDoc.uploadedAt,
+            },
+          };
+        } finally {
+          consumer.destroy();
+        }
+      } catch (error) {
+        console.error('Failed to read source from SourceMap:', error);
+      }
+    }
+
+    return null;
+  }
+
+  private async findSourceMapCandidates(
+    projectId: string,
+    version?: string
+  ): Promise<SourceMapEntity[]> {
+    const qb = this.sourceMapRepository
+      .createQueryBuilder('s')
+      .where('s.projectId = :projectId', { projectId })
+      .orderBy('s.uploadedAt', 'DESC')
+      .take(100);
+
+    if (version) {
+      qb.andWhere('s.version = :version', { version });
+    }
+
+    return qb.getMany();
+  }
+
+  private resolveOriginalSource(
+    consumer: sourceMap.SourceMapConsumer,
+    requestedFile: string,
+    line?: number,
+    column?: number
+  ): { source: string; line?: number; column?: number } | null {
+    const sources = ((consumer as any).sources || []) as string[];
+    const normalizedSources = sources.map((source) => ({
+      original: source,
+      normalized: this.normalizePath(source),
+    }));
+
+    const sourceMatch = normalizedSources.find(
+      (source) =>
+        source.normalized === requestedFile ||
+        source.normalized.endsWith(requestedFile) ||
+        requestedFile.endsWith(source.normalized)
+    );
+
+    if (sourceMatch) {
+      return {
+        source: sourceMatch.original,
+        line,
+        column,
+      };
+    }
+
+    if (!line) {
+      return null;
+    }
+
+    const originalPosition = consumer.originalPositionFor({
+      line,
+      column: column ?? 0,
+      bias: sourceMap.SourceMapConsumer.LEAST_UPPER_BOUND,
+    });
+
+    if (!originalPosition.source) {
+      return null;
+    }
+
+    return {
+      source: originalPosition.source,
+      line: originalPosition.line ?? undefined,
+      column: originalPosition.column ?? undefined,
+    };
+  }
+
+  private buildSnippet(content: string, targetLine: number, context: number) {
+    const lines = content.split(/\r?\n/);
+    const safeTarget = Math.max(1, Math.min(targetLine, lines.length || 1));
+    const startLine = Math.max(1, safeTarget - context);
+    const endLine = Math.min(lines.length, safeTarget + context);
+
+    return {
+      startLine,
+      endLine,
+      lines: lines.slice(startLine - 1, endLine).map((line, index) => {
+        const lineNumber = startLine + index;
+        return {
+          line: lineNumber,
+          content: line,
+          highlighted: lineNumber === safeTarget,
+        };
+      }),
+    };
+  }
+
   private async findBestMatch(
     projectId: string,
     file: string,
@@ -388,6 +561,15 @@ export class SourceMapService {
     if (filenameMatch) return filenameMatch;
 
     return data[0] || null;
+  }
+
+  private normalizePath(value: string): string {
+    return value
+      .replace(/^webpack:\/\//, '')
+      .replace(/^file:\/\//, '')
+      .replace(/^\/+/, '')
+      .replace(/[?#].*$/, '')
+      .replace(/\\/g, '/');
   }
 
   private decodeBase64(base64: string): string {

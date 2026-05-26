@@ -241,11 +241,6 @@ export class Monitor {
     // 异步执行，不阻塞
     void processError();
 
-    // 自动上传未上传的 SourceMap 到服务端
-    this.uploadPendingSourceMaps();
-    
-    // 异步执行，不阻塞
-    void processError();
 
     // 如果启用自动上报，则在错误添加后自动上报
     if (this.config.autoReport) {
@@ -261,11 +256,6 @@ export class Monitor {
    * 避免重复上传已存在的文件
    */
   private async uploadPendingSourceMaps() {
-    //模拟手动出发sourcemap 上传 
-    function triggerSourceMapUpload() {
-     
-    }
-
     if (this.sourceMaps.length === 0) {
       return;
     }

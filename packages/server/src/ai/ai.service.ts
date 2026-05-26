@@ -1,50 +1,78 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-
-// import { QueueService } from '../queue/queue.service';
-// import { ReportService } from '../report/report.service';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { QueueService } from '../queue/queue.service';
+import { ReportEntity } from '../report/entities/report.entity';
 import { modelAnalysis } from './alModel';
 
-/**
- * AiService
- * ---------
- * 用于对错误日志进行 AI 辅助分析，生成修复建议或摘要。
- * 当前实现仅在 `analyzeError` 中直接调用模型，未来可扩展为基于队列的 worker。
- */
+const AI_QUEUE_NAME = 'error-analysis';
+
 @Injectable()
-export class AiService implements OnModuleInit {
-  constructor() {
-    this.onModuleInit();
-  }
+export class AiService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AiService.name);
+  private workerTimer?: NodeJS.Timeout;
 
-  /**
-   * 模块初始化生命周期钩子，可在具备 API Key 时启动后台任务。
-   */
+  constructor(
+    @Optional() private readonly queueService: QueueService,
+    @InjectRepository(ReportEntity)
+    private readonly reportRepository: Repository<ReportEntity>
+  ) {}
+
   onModuleInit() {
-    // if (process.env.ANTHROPIC_API_KEY) {
-    //   // this.startWorker();
-    // }
+    if (process.env.AI_QUEUE_ENABLED !== 'true') {
+      return;
+    }
+
+    if (!process.env.AI_API_KEY && !process.env.OPENAI_API_KEY) {
+      this.logger.warn('AI queue is enabled, but AI_API_KEY is not configured');
+      return;
+    }
+
+    this.workerTimer = setInterval(() => {
+      void this.consumeNextTask();
+    }, Number(process.env.AI_QUEUE_INTERVAL_MS || 5000));
   }
 
-  /**
-   * 将错误数组序列化为 prompt，交由 AI 模型输出自然语言分析。
-   */
-  async analyzeError(errors: any[]) {
-    const prompt = `分析以下前端错误并提供解决方案：\n${JSON.stringify(errors, null, 2)}`;
-
-    const message = await modelAnalysis(prompt);
-
-    return message;
+  onModuleDestroy() {
+    if (this.workerTimer) {
+      clearInterval(this.workerTimer);
+    }
   }
 
-  // private async startWorker() {
-  //   setInterval(async () => {
-  //     const task = await this.queueService.pop('error-analysis');
-  //     if (task) {
-  //       const analysis = await this.analyzeError(task.errors);
-  //       if (analysis) {
-  //         await this.reportService.updateAiAnalysis(task.reportId, analysis);
-  //       }
-  //     }
-  //   }, 5000);
-  // }
+  async analyzeError(payload: any) {
+    const errors = Array.isArray(payload) ? payload : payload?.errors;
+    const projectId = Array.isArray(payload) ? undefined : payload?.projectId;
+
+    const prompt = [
+      '请分析以下前端异常，并给出可能原因、影响范围、排查步骤和修复建议。',
+      projectId ? `项目 ID: ${projectId}` : '',
+      JSON.stringify(errors ?? payload, null, 2),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    return modelAnalysis(prompt);
+  }
+
+  private async consumeNextTask() {
+    if (!this.queueService?.isEnabled()) {
+      return;
+    }
+
+    const task = await this.queueService.pop(AI_QUEUE_NAME);
+    if (!task?.reportId || !task?.errors?.length) {
+      return;
+    }
+
+    try {
+      const analysis = await this.analyzeError({
+        projectId: task.projectId,
+        errors: task.errors,
+      });
+
+      await this.reportRepository.update({ id: task.reportId }, { aiAnalysis: analysis });
+    } catch (error) {
+      this.logger.error(`AI analysis worker failed for report ${task.reportId}`, error as Error);
+    }
+  }
 }

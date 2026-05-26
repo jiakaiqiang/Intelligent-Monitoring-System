@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import { QueueService } from '../queue/queue.service';
 import { ReportEntity } from './entities/report.entity';
+
+const AI_QUEUE_NAME = 'error-analysis';
 
 export interface ProjectReportResponse {
   status: number;
@@ -18,7 +21,8 @@ export interface ProjectReportResponse {
 export class ReportService {
   constructor(
     @InjectRepository(ReportEntity)
-    private readonly reportRepository: Repository<ReportEntity>
+    private readonly reportRepository: Repository<ReportEntity>,
+    @Optional() private readonly queueService?: QueueService
   ) {}
 
   /**
@@ -34,19 +38,49 @@ export class ReportService {
       processedData: reportData.processedData ?? null,
       aiAnalysis: reportData.aiAnalysis ?? null,
     });
-    console.log(report, 'report');
-    return this.reportRepository.save(report);
+    const savedReport = await this.reportRepository.save(report);
+
+    if (
+      process.env.AI_QUEUE_ENABLED === 'true' &&
+      savedReport.id &&
+      Array.isArray(savedReport.errorLogs) &&
+      savedReport.errorLogs.length > 0
+    ) {
+      await this.queueService?.push(AI_QUEUE_NAME, {
+        reportId: savedReport.id,
+        projectId: savedReport.projectId,
+        errors: savedReport.errorLogs,
+      });
+    }
+
+    return savedReport;
   }
 
   /**
    * 查询指定项目最近的上报（默认 50 条，按创建时间倒序）。
    */
   async findByProject(projectId: string, limit = 50): Promise<ProjectReportResponse> {
-    console.log(projectId, 'projectId');
+    const take = Math.max(1, Math.min(limit, 200));
+
+    if (projectId === 'performance') {
+      const data = await this.reportRepository.find({
+        where: { performance: Not(IsNull()) },
+        order: { createdAt: 'DESC' },
+        take,
+      });
+
+      return {
+        status: 0,
+        message: 'success',
+        data,
+      };
+    }
+
+    const where = projectId === 'default' ? undefined : { projectId };
     const dataList = await this.reportRepository.find({
-   
+      ...(where ? { where } : {}),
       order: { createdAt: 'DESC' },
-      take: limit,
+      take,
     });
 
     const data = dataList.filter((item) => item.errorLogs && item.errorLogs.length > 0);
@@ -65,15 +99,8 @@ export class ReportService {
         break;
       case 'Source':
         responseList = data.filter((item) =>
-          item.errorLogs?.some((error) => error.type?.includes('source'))
+          item.errorLogs?.some((error) => error.type?.includes('resource'))
         );
-        break;
-      case 'performance':
-        {
-          const list = dataList.filter((item) => item.performance);
-          console.log(list ,'wefwfe')
-          responseList = list.length > 0 ? [list.shift()] : [];
-        }
         break;
       case 'default':
       default:

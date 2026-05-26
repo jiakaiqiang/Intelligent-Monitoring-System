@@ -3,7 +3,7 @@
 
       const monitor = new Monitor({
         projectId: 'demo-project',
-        reportUrl: 'http://10.173.26.56:3000',
+        reportUrl: 'http://localhost:3000',
         maxErrors: 5,
         sampleRate: 1,
       });

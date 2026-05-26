@@ -1,17 +1,9 @@
-import { Controller, Post, Get, Body, Param, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ReportService } from './report.service';
+import { ErrorMappingService } from '../error-mapping/error-mapping.service';
 import { SourceMapService } from '../sourcemap/sourcemap.service';
+import { ReportService } from './report.service';
 
-/**
- * ReportController
- * ----------------
- * 暴露监控 SDK 的上报接口 `/api/jkq` 及后台调试接口。
- * 目前包含：
- * - `GET /api/report`：临时调试入口，直接返回请求体；
- * - `POST /api/jkq`：SDK 主上报接口，会尝试进行 SourceMap 映射；
- * - `GET /api/reports/:projectId`：查询指定项目的历史报告。
- */
 @Controller('api')
 export class ReportController {
   constructor(
@@ -19,80 +11,56 @@ export class ReportController {
     private readonly sourceMapService: SourceMapService
   ) {}
 
-  /**
-   * 简单的测试接口，用于验证网关/反向代理是否将请求正确转发到服务端。
-   */
   @Post('report')
   async createReport(@Body() reportData: any) {
-    console.log(reportData, 'reportData12');
-    return this.reportService.create(reportData);
+    return this.createProcessedReport(reportData);
   }
 
-  /**
-   * 健康检查 / 快速验证服务是否启动。
-   */
+  @Post('jkq')
+  async createJkq(@Body() reportData: any) {
+    return this.createProcessedReport(reportData);
+  }
+
   @Get('test')
   async test() {
     return { message: 'test' };
   }
 
-  /**
-   * SDK 上报入口：
-   * 1. 如果上报包含 sourceMaps，先保存到 sourcemaps 表；
-   * 2. 动态加载 ErrorMappingService 进行 SourceMap 映射；
-   * 3. 将映射结果合并到报告数据后交给 ReportService 持久化；
-   * 4. 若映射失败则兜底保存原始 payload。
-   */
-  @Post('jkq')
-  async createJkq(@Body() jkqData: any) {
-    console.log(jkqData, 'jkqData', this.reportService);
+  @Get('reports/:projectId')
+  async getReports(
+    @Param('projectId') projectId: string,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const result = await this.reportService.findByProject(projectId);
+    res.header('X-Report-Count', result.data.length.toString());
+    res.header('Content-Type', 'application/json');
+    return result;
+  }
 
+  private async createProcessedReport(reportData: any) {
     try {
-      // 如果上报包含 sourceMaps，先保存到数据库
-      if (jkqData.sourceMaps && jkqData.sourceMaps.length > 0) {
-        await this.sourceMapService.create(jkqData.projectId, jkqData.sourceMaps);
-        console.log(`Saved ${jkqData.sourceMaps.length} sourceMaps to database`);
+      if (Array.isArray(reportData.sourceMaps) && reportData.sourceMaps.length > 0) {
+        await this.sourceMapService.create(reportData.projectId, reportData.sourceMaps);
       }
 
-      const { ErrorMappingService } = await import('../error-mapping/error-mapping.service');
       const errorMappingService = new ErrorMappingService(
         this.reportService,
         this.sourceMapService
       );
 
       const processed = await errorMappingService.processReport({
-        projectId: jkqData.projectId,
-        errors: jkqData.errors,
-        sourceMaps: jkqData.sourceMaps,
+        projectId: reportData.projectId,
+        errors: reportData.errors,
+        sourceMaps: reportData.sourceMaps,
       });
 
-      // 保存处理后的数据
-      const result = await this.reportService.create({
-        ...jkqData,
+      return this.reportService.create({
+        ...reportData,
         processedData: processed,
       });
-
-      return result;
     } catch (error) {
       console.error('Error processing report:', error);
-      // 如果处理失败，仍然保存原始数据
-      return this.reportService.create(jkqData);
+      return this.reportService.create(reportData);
     }
-  }
-
-  /**
-   * 根据项目 ID 查询最近的报告，供 Dashboard 构建列表/趋势图。
-   */
-  @Get('reports/:projectId')
-  async getReports(
-    @Param('projectId') projectId: string,
-    @Res({ passthrough: true }) res: Response
-  ) {
-    console.log(projectId, 'projectId');
-
-    const result = await this.reportService.findByProject(projectId);
-    res.header('X-Report-Count', result.data.length.toString());
-    res.header('Content-Type', 'application/json');
-    return result;
   }
 }

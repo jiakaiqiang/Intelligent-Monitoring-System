@@ -162,7 +162,7 @@ docker run -d -p 6379:6379 redis
 
 # 3. 配置环境变量
 cp .env.example .env
-# 编辑 .env 填入 ANTHROPIC_API_KEY
+# 编辑 .env 填入 AI_API_KEY
 
 # 4. 启动开发服务
 pnpm dev

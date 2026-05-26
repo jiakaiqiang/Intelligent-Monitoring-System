@@ -1,59 +1,242 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import type { ErrorInfo } from '@monitor/shared/types';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import type { ErrorInfo, PerformanceMetrics } from '@monitor/shared/types';
 import ErrorList from '../components/ErrorList.vue';
+import FileTraceTree from '../components/FileTraceTree.vue';
 import PerformanceDashboard from '../components/PerformanceDashboard.vue';
 
-const API_BASE_URL = import.meta.env.VITE_MONITOR_API ?? 'http://10.173.26.56:3000';
+const API_BASE_URL = import.meta.env.VITE_MONITOR_API ?? 'http://localhost:3000';
 
-type View = 'errors' | 'performance';
+type View = 'overview' | 'errors' | 'performance' | 'files';
+
+interface TrackedErrorInfo extends ErrorInfo {
+  mappedStack?: string;
+  sourceFile?: string;
+  sourceLine?: number;
+  sourceColumn?: number;
+  reportId?: string;
+  projectId?: string;
+}
+
+interface ReportRecord {
+  id: string;
+  projectId: string;
+  errorLogs?: TrackedErrorInfo[] | null;
+  performance?: PerformanceMetrics | null;
+  processedData?: {
+    mappedErrors?: TrackedErrorInfo[];
+  } | null;
+  createdAt?: string;
+}
+
+interface ProjectSummary {
+  id: string;
+  name: string;
+  errorCount: number;
+  fileCount: number;
+  metricCount: number;
+  latestAt: number;
+}
+
 type AiRequestPayload = {
-  error: ErrorInfo;
+  error: TrackedErrorInfo;
   index: number;
   projectId: string;
 };
 
-const currentView = ref<View>('errors');
+const currentView = ref<View>('overview');
+const selectedProjectId = ref('default');
+const projectSearch = ref('');
+const loading = ref(false);
+const loadError = ref<string | null>(null);
+const reports = ref<ReportRecord[]>([]);
+const performanceReports = ref<ReportRecord[]>([]);
+const selectedTracePath = ref('');
 const currentTime = ref(new Date());
-const systemStatus = ref('在线');
-
-// Update time every second
-onMounted(() => {
-  setInterval(() => {
-    currentTime.value = new Date();
-  }, 1000);
-});
-
-const formattedTime = computed(() => {
-  return currentTime.value.toLocaleTimeString('zh-CN', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-});
-
-const formattedDate = computed(() => {
-  return currentTime.value.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  });
-});
 
 const isAiDrawerOpen = ref(false);
 const aiDrawerLoading = ref(false);
 const aiDrawerContent = ref('');
 const aiDrawerError = ref<string | null>(null);
-const aiDrawerErrorInfo = ref<ErrorInfo | null>(null);
+const aiDrawerErrorInfo = ref<TrackedErrorInfo | null>(null);
 const aiDrawerProjectId = ref('');
 const aiAnalyzingIndex = ref<number | null>(null);
 const aiAbortController = ref<AbortController | null>(null);
 
-const aiDrawerTimestamp = computed(() => {
-  if (!aiDrawerErrorInfo.value?.timestamp) {
-    return '';
+let clockTimer: number | undefined;
+
+const normalizeTracePath = (value: string) => {
+  return value
+    .replace(/^webpack:\/\//, '')
+    .replace(/^file:\/\//, '')
+    .replace(/^\/+/, '')
+    .replace(/[?#].*$/, '')
+    .replace(/\\/g, '/');
+};
+
+const parseStackPath = (line: string) => {
+  const chromeMatch = line.match(/^\s*at\s+(?:(.*?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/);
+  if (chromeMatch) return normalizeTracePath(chromeMatch[2]);
+
+  const firefoxMatch = line.match(/^\s*(.*?)@(.+?):(\d+):(\d+)\s*$/);
+  if (firefoxMatch) return normalizeTracePath(firefoxMatch[2]);
+
+  return '';
+};
+
+const getErrorTracePaths = (error: TrackedErrorInfo) => {
+  const paths = new Set<string>();
+
+  if (error.sourceFile) {
+    paths.add(normalizeTracePath(error.sourceFile));
   }
+
+  const stack = error.mappedStack || error.stack;
+  stack?.split('\n').forEach((line) => {
+    const path = parseStackPath(line);
+    if (path) paths.add(path);
+  });
+
+  return [...paths];
+};
+
+const extractErrorsFromReport = (report: ReportRecord): TrackedErrorInfo[] => {
+  const mappedErrors = report.processedData?.mappedErrors;
+  const source = Array.isArray(mappedErrors) && mappedErrors.length > 0
+    ? mappedErrors
+    : report.errorLogs;
+
+  if (!Array.isArray(source)) {
+    return [];
+  }
+
+  return source.map((error) => ({
+    ...error,
+    reportId: report.id,
+    projectId: report.projectId,
+  }));
+};
+
+const allErrors = computed(() =>
+  reports.value.flatMap((report) => extractErrorsFromReport(report))
+);
+
+const projectErrors = computed(() =>
+  allErrors.value
+    .filter((error) => error.projectId === selectedProjectId.value)
+    .sort((a, b) => b.timestamp - a.timestamp)
+);
+
+const projectMetrics = computed(() =>
+  performanceReports.value
+    .filter((report) => report.projectId === selectedProjectId.value && report.performance)
+    .map((report) => report.performance as PerformanceMetrics)
+    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+);
+
+const projects = computed<ProjectSummary[]>(() => {
+  const map = new Map<string, ProjectSummary>();
+
+  const ensureProject = (id: string) => {
+    if (!map.has(id)) {
+      map.set(id, {
+        id,
+        name: id,
+        errorCount: 0,
+        fileCount: 0,
+        metricCount: 0,
+        latestAt: 0,
+      });
+    }
+    return map.get(id) as ProjectSummary;
+  };
+
+  reports.value.forEach((report) => {
+    const project = ensureProject(report.projectId || 'default');
+    const errors = extractErrorsFromReport(report);
+    project.errorCount += errors.length;
+    project.latestAt = Math.max(project.latestAt, Date.parse(report.createdAt || '') || 0);
+  });
+
+  performanceReports.value.forEach((report) => {
+    const project = ensureProject(report.projectId || 'default');
+    project.metricCount += report.performance ? 1 : 0;
+    project.latestAt = Math.max(
+      project.latestAt,
+      Date.parse(report.createdAt || '') || report.performance?.timestamp || 0
+    );
+  });
+
+  map.forEach((project) => {
+    const files = allErrors.value
+      .filter((error) => error.projectId === project.id)
+      .flatMap((error) => getErrorTracePaths(error));
+    project.fileCount = new Set(files).size;
+  });
+
+  return [...map.values()].sort((a, b) => b.latestAt - a.latestAt || a.id.localeCompare(b.id));
+});
+
+const filteredProjects = computed(() => {
+  const keyword = projectSearch.value.trim().toLowerCase();
+  if (!keyword) return projects.value;
+  return projects.value.filter((project) => project.id.toLowerCase().includes(keyword));
+});
+
+const selectedProject = computed(() =>
+  projects.value.find((project) => project.id === selectedProjectId.value) || {
+    id: selectedProjectId.value,
+    name: selectedProjectId.value,
+    errorCount: 0,
+    fileCount: 0,
+    metricCount: 0,
+    latestAt: 0,
+  }
+);
+
+const latestErrors = computed(() => projectErrors.value.slice(0, 5));
+
+const avgMetric = computed(() => {
+  const metrics = projectMetrics.value;
+  if (!metrics.length) {
+    return {};
+  }
+
+  const average = (key: keyof PerformanceMetrics) =>
+    metrics.reduce((sum, metric) => sum + Number(metric[key] || 0), 0) / metrics.length;
+
+  return {
+    fcp: average('fcp'),
+    lcp: average('lcp'),
+    fid: average('fid'),
+    cls: average('cls'),
+  };
+});
+
+const visibleTraceErrors = computed(() => {
+  if (!selectedTracePath.value) return projectErrors.value;
+  return projectErrors.value.filter((error) => getErrorTracePaths(error).includes(selectedTracePath.value));
+});
+
+const formattedTime = computed(() =>
+  currentTime.value.toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+);
+
+const formattedDate = computed(() =>
+  currentTime.value.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  })
+);
+
+const aiDrawerTimestamp = computed(() => {
+  if (!aiDrawerErrorInfo.value?.timestamp) return '';
   return new Date(aiDrawerErrorInfo.value.timestamp).toLocaleString('zh-CN', {
     hour12: false,
     year: 'numeric',
@@ -64,6 +247,67 @@ const aiDrawerTimestamp = computed(() => {
     second: '2-digit',
   });
 });
+
+const viewItems: Array<{ id: View; label: string; description: string }> = [
+  { id: 'overview', label: '项目概览', description: '健康状态和最近异常' },
+  { id: 'errors', label: '错误日志', description: '按类型查看异常事件' },
+  { id: 'performance', label: '性能指标', description: 'Web Vitals 与采样' },
+  { id: 'files', label: '异常文件', description: '按文件树追踪堆栈' },
+];
+
+const fetchJson = async (path: string) => {
+  const response = await fetch(`${API_BASE_URL}${path}`);
+  if (!response.ok) {
+    throw new Error(`${path} request failed`);
+  }
+  return response.json();
+};
+
+const loadDashboard = async () => {
+  loading.value = true;
+  loadError.value = null;
+
+  try {
+    const [reportPayload, performancePayload] = await Promise.all([
+      fetchJson('/api/reports/default'),
+      fetchJson('/api/reports/performance'),
+    ]);
+
+    reports.value = Array.isArray(reportPayload.data) ? reportPayload.data : [];
+    performanceReports.value = Array.isArray(performancePayload.data) ? performancePayload.data : [];
+
+    if (!projects.value.some((project) => project.id === selectedProjectId.value)) {
+      selectedProjectId.value = projects.value[0]?.id || 'default';
+    }
+  } catch (error) {
+    console.error('Failed to load dashboard data:', error);
+    loadError.value = '数据加载失败，请确认后端服务已启动。';
+    reports.value = [];
+    performanceReports.value = [];
+  } finally {
+    loading.value = false;
+  }
+};
+
+const selectProject = (projectId: string) => {
+  selectedProjectId.value = projectId;
+  selectedTracePath.value = '';
+};
+
+const formatNumber = (value: number | undefined, digits = 0) => {
+  if (value === undefined || Number.isNaN(value)) return '--';
+  return value.toFixed(digits);
+};
+
+const formatDateTime = (timestamp: number) => {
+  if (!timestamp) return '暂无';
+  return new Date(timestamp).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 const handleRequestAiAnalysis = (payload: AiRequestPayload) => {
   cancelAiStream();
@@ -105,38 +349,26 @@ const startAiAnalysisStream = async (payload: AiRequestPayload) => {
   const controller = new AbortController();
   aiAbortController.value = controller;
 
-  const body = JSON.stringify({
-    projectId: payload.projectId,
-    errors: [payload.error],
-  });
-
-  const request = (path: string) =>
-    fetch(`${API_BASE_URL}${path}`, {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/ai/analyze`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: payload.projectId,
+        errors: [payload.error],
+      }),
       signal: controller.signal,
     });
 
-  try {
-  
-      let  response = await request('/api/ai/analyze');
-    let data = await response.json();
-   console.log(data,'response')
     if (!response.ok) {
       throw new Error('AI analysis request failed');
     }
 
     await consumeAiResponse(response);
   } catch (error) {
-    console.log(error,'error')
-    if ((error as DOMException)?.name === 'AbortError') {
-      return;
-    }
+    if ((error as DOMException)?.name === 'AbortError') return;
     console.error('AI analysis failed:', error);
-    aiDrawerError.value = 'AI 分析失败，请稍后再试。';
+    aiDrawerError.value = 'AI 分析失败，请检查 AI_API_KEY 或稍后重试。';
   } finally {
     aiDrawerLoading.value = false;
     aiAbortController.value = null;
@@ -182,25 +414,17 @@ const consumeAiResponse = async (response: Response) => {
 const flushStreamBuffer = (chunk: string) => {
   const segments = chunk.split('\n\n');
   const pending = segments.pop() ?? '';
-
-  segments.forEach((segment) => {
-    appendStreamChunk(segment);
-  });
-
+  segments.forEach((segment) => appendStreamChunk(segment));
   return pending;
 };
 
 const appendStreamChunk = (segment: string) => {
-  if (!segment) return;
-
   const normalizedLines = segment
     .split('\n')
     .map((line) => line.replace(/^data:\s*/i, '').trim())
     .filter((line) => line && line !== '[DONE]');
 
-  if (!normalizedLines.length) {
-    return;
-  }
+  if (!normalizedLines.length) return;
 
   const normalized = normalizedLines.join('\n');
   aiDrawerContent.value = aiDrawerContent.value
@@ -209,14 +433,8 @@ const appendStreamChunk = (segment: string) => {
 };
 
 const extractAiText = (payload: any) => {
-  if (!payload) {
-    return 'AI 未返回分析结果。';
-  }
-
-  if (typeof payload === 'string') {
-    return payload;
-  }
-
+  if (!payload) return 'AI 未返回分析结果。';
+  if (typeof payload === 'string') return payload;
   return (
     payload.analysis ??
     payload.data?.analysis ??
@@ -227,666 +445,865 @@ const extractAiText = (payload: any) => {
 };
 
 onMounted(() => {
+  loadDashboard();
   window.addEventListener('keydown', handleEscKey);
+  clockTimer = window.setInterval(() => {
+    currentTime.value = new Date();
+  }, 1000);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEscKey);
   cancelAiStream();
+  if (clockTimer) window.clearInterval(clockTimer);
 });
 </script>
 
 <template>
-  <div class="nx-app">
-    <!-- Ambient glow effects -->
-    <div class="nx-ambient-glow nx-ambient-glow--cyan"></div>
-    <div class="nx-ambient-glow nx-ambient-glow--magenta"></div>
+  <div class="monitor-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 18V6.8C4 5.8 4.8 5 5.8 5h12.4C19.2 5 20 5.8 20 6.8V18H4Z" stroke="currentColor" stroke-width="1.8" />
+            <path d="M7 14l3-3 2.3 2.3L17 8.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M3 19h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+        </div>
+        <div>
+          <p class="brand__title">智能监控系统</p>
+          <p class="brand__subtitle">Monitoring</p>
+        </div>
+      </div>
 
-    <!-- Header -->
-    <header class="nx-header">
-      <div class="nx-header__left">
-        <div class="nx-logo">
-          <div class="nx-logo__icon">
-            <svg viewBox="0 0 40 40" fill="none">
-              <path d="M20 2L38 12V28L20 38L2 28V12L20 2Z" stroke="currentColor" stroke-width="2" />
-              <path d="M20 8L32 15V25L20 32L8 25V15L20 8Z" fill="currentColor" opacity="0.3" />
-              <circle cx="20" cy="20" r="4" fill="currentColor" />
+      <nav class="sidebar-nav" aria-label="项目视图">
+        <button
+          v-for="item in viewItems"
+          :key="item.id"
+          type="button"
+          class="sidebar-nav__item"
+          :class="{ 'sidebar-nav__item--active': currentView === item.id }"
+          @click="currentView = item.id"
+        >
+          <span class="sidebar-nav__label">{{ item.label }}</span>
+          <span class="sidebar-nav__desc">{{ item.description }}</span>
+        </button>
+      </nav>
+
+      <section class="project-switcher">
+        <div class="section-heading">
+          <span>项目</span>
+          <button type="button" class="icon-button" aria-label="刷新项目" @click="loadDashboard">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M20 12a8 8 0 1 1-2.3-5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              <path d="M20 5v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
-          </div>
-          <div class="nx-logo__text">
-            <span class="nx-logo__title">神经枢纽</span>
-            <span class="nx-logo__subtitle">监控系统</span>
-          </div>
+          </button>
         </div>
-      </div>
-
-      <div class="nx-header__center">
-        <nav class="nx-nav">
+        <label class="project-search">
+          <span class="sr-only">搜索项目</span>
+          <input v-model="projectSearch" type="search" placeholder="搜索项目 ID" />
+        </label>
+        <div class="project-list">
           <button
-            class="nx-nav__item"
-            :class="{ 'nx-nav__item--active': currentView === 'errors' }"
-            @click="currentView = 'errors'"
+            v-for="project in filteredProjects"
+            :key="project.id"
+            type="button"
+            class="project-item"
+            :class="{ 'project-item--active': selectedProjectId === project.id }"
+            @click="selectProject(project.id)"
           >
-            <span class="nx-nav__icon">⚠</span>
-            <span class="nx-nav__label">错误日志</span>
-            <span class="nx-nav__indicator"></span>
-          </button>
-          <button
-            class="nx-nav__item"
-            :class="{ 'nx-nav__item--active': currentView === 'performance' }"
-            @click="currentView = 'performance'"
-          >
-            <span class="nx-nav__icon">◈</span>
-            <span class="nx-nav__label">性能指标</span>
-            <span class="nx-nav__indicator"></span>
-          </button>
-        </nav>
-      </div>
-
-      <div class="nx-header__right">
-        <div class="nx-status-panel">
-          <div class="nx-status-panel__item">
-            <span class="nx-status-panel__label">系统状态</span>
-            <span class="nx-status-panel__value nx-status-panel__value--online">
-              <span class="nx-pulse"></span>
-              {{ systemStatus }}
+            <span class="project-item__name">{{ project.name }}</span>
+            <span class="project-item__meta">
+              {{ project.errorCount }} 错误 · {{ project.fileCount }} 文件
             </span>
-          </div>
-          <div class="nx-status-panel__divider"></div>
-          <div class="nx-status-panel__item">
-            <span class="nx-status-panel__label">{{ formattedDate }}</span>
-            <span class="nx-status-panel__value nx-status-panel__value--time">{{
-              formattedTime
-            }}</span>
-          </div>
+          </button>
+          <div v-if="!filteredProjects.length" class="project-empty">暂无项目数据</div>
         </div>
-      </div>
-    </header>
+      </section>
 
-    <!-- Main Content -->
-    <main class="nx-main">
-      <div class="nx-content">
-        <Transition name="nx-fade" mode="out-in">
+      <div class="sidebar-status">
+        <span class="status-dot"></span>
+        <span>在线</span>
+        <span class="sidebar-status__time">{{ formattedTime }}</span>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="workspace-header">
+        <div>
+          <p class="workspace-header__eyebrow">项目 / {{ selectedProject.id }}</p>
+          <h1>{{ selectedProject.name }}</h1>
+          <p class="workspace-header__meta">
+            {{ formattedDate }} · API {{ API_BASE_URL }}
+          </p>
+        </div>
+        <div class="workspace-header__actions">
+          <button type="button" class="ghost-button" :disabled="loading" @click="loadDashboard">
+            {{ loading ? '刷新中' : '刷新数据' }}
+          </button>
+        </div>
+      </header>
+
+      <div v-if="loadError" class="notice notice--error">{{ loadError }}</div>
+
+      <Transition name="fade" mode="out-in">
+        <section v-if="currentView === 'overview'" key="overview" class="overview-grid">
+          <div class="stat-card">
+            <span class="stat-card__label">错误事件</span>
+            <strong>{{ selectedProject.errorCount }}</strong>
+            <span>当前项目最近采集的异常数量</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">异常文件</span>
+            <strong>{{ selectedProject.fileCount }}</strong>
+            <span>从 SourceMap 或堆栈提取的文件数</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">性能样本</span>
+            <strong>{{ selectedProject.metricCount }}</strong>
+            <span>该项目已上报的 Web Vitals 样本</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">平均 LCP</span>
+            <strong>{{ formatNumber(avgMetric.lcp) }}<small>ms</small></strong>
+            <span>最大内容绘制平均值</span>
+          </div>
+
+          <div class="overview-panel overview-panel--wide">
+            <div class="panel-title">
+              <h2>最近异常</h2>
+              <button type="button" class="text-button" @click="currentView = 'errors'">查看全部</button>
+            </div>
+            <div v-if="latestErrors.length" class="compact-list">
+              <button
+                v-for="(error, index) in latestErrors"
+                :key="`${error.reportId}-${index}`"
+                type="button"
+                class="compact-row"
+                @click="currentView = 'errors'"
+              >
+                <span class="compact-row__type">{{ error.type }}</span>
+                <span class="compact-row__message">{{ error.message }}</span>
+                <span class="compact-row__time">{{ formatDateTime(error.timestamp) }}</span>
+              </button>
+            </div>
+            <div v-else class="empty-inline">这个项目暂时没有错误事件。</div>
+          </div>
+
+          <div class="overview-panel">
+            <div class="panel-title">
+              <h2>性能快照</h2>
+              <button type="button" class="text-button" @click="currentView = 'performance'">打开指标</button>
+            </div>
+            <dl class="metric-snapshot">
+              <div>
+                <dt>FCP</dt>
+                <dd>{{ formatNumber(avgMetric.fcp) }}ms</dd>
+              </div>
+              <div>
+                <dt>LCP</dt>
+                <dd>{{ formatNumber(avgMetric.lcp) }}ms</dd>
+              </div>
+              <div>
+                <dt>FID</dt>
+                <dd>{{ formatNumber(avgMetric.fid) }}ms</dd>
+              </div>
+              <div>
+                <dt>CLS</dt>
+                <dd>{{ formatNumber(avgMetric.cls, 3) }}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <ErrorList
+          v-else-if="currentView === 'errors'"
+          key="errors"
+          :project-id="selectedProjectId"
+          :errors="projectErrors"
+          :loading="loading"
+          :ai-analyzing-index="aiAnalyzingIndex"
+          @refresh="loadDashboard"
+          @request-ai-analysis="handleRequestAiAnalysis"
+        />
+
+        <PerformanceDashboard
+          v-else-if="currentView === 'performance'"
+          key="performance"
+          :project-id="selectedProjectId"
+          :metrics="projectMetrics"
+          :loading="loading"
+        />
+
+        <section v-else key="files" class="file-view">
+          <FileTraceTree
+            :errors="projectErrors"
+            :selected-path="selectedTracePath"
+            @select-file="selectedTracePath = $event"
+            @clear-selection="selectedTracePath = ''"
+          />
           <ErrorList
-            v-if="currentView === 'errors'"
-            key="errors"
+            class="file-view__errors"
+            :project-id="selectedProjectId"
+            :errors="visibleTraceErrors"
+            :loading="loading"
+            :show-toolbar="false"
             :ai-analyzing-index="aiAnalyzingIndex"
+            @refresh="loadDashboard"
             @request-ai-analysis="handleRequestAiAnalysis"
           />
-          <PerformanceDashboard v-else key="performance" />
-        </Transition>
-      </div>
+        </section>
+      </Transition>
     </main>
 
     <Transition name="ai-drawer">
       <div v-if="isAiDrawerOpen" class="ai-drawer">
-        <div class="ai-drawer__mask" @click="closeAiDrawer"></div>
-        <div class="ai-drawer__panel">
-          <div class="ai-drawer__header">
+        <button class="ai-drawer__mask" type="button" aria-label="关闭 AI 分析" @click="closeAiDrawer"></button>
+        <aside class="ai-drawer__panel" aria-label="AI 分析面板">
+          <header class="ai-drawer__header">
             <div>
               <p class="ai-drawer__eyebrow">AI 实时分析</p>
-              <p class="ai-drawer__title">{{ aiDrawerErrorInfo?.message || '未知错误' }}</p>
+              <h2>{{ aiDrawerErrorInfo?.message || '未知错误' }}</h2>
               <p class="ai-drawer__meta-line">
                 <span>{{ aiDrawerErrorInfo?.type?.toUpperCase() || 'N/A' }}</span>
-                <span v-if="aiDrawerTimestamp">· {{ aiDrawerTimestamp }}</span>
-                <span v-if="aiDrawerProjectId">· 项目 {{ aiDrawerProjectId }}</span>
+                <span v-if="aiDrawerTimestamp">{{ aiDrawerTimestamp }}</span>
+                <span>项目 {{ aiDrawerProjectId }}</span>
               </p>
             </div>
-            <button class="ai-drawer__close" @click="closeAiDrawer">
+            <button class="ai-drawer__close" type="button" aria-label="关闭 AI 分析面板" @click="closeAiDrawer">
               关闭
-              <span>ESC</span>
             </button>
+          </header>
+
+          <div v-if="aiDrawerErrorInfo" class="ai-drawer__details">
+            <div>
+              <span>URL</span>
+              <code>{{ aiDrawerErrorInfo.url }}</code>
+            </div>
+            <div v-if="aiDrawerErrorInfo.sourceFile">
+              <span>Source</span>
+              <code>
+                {{ aiDrawerErrorInfo.sourceFile }}:{{ aiDrawerErrorInfo.sourceLine }}:{{ aiDrawerErrorInfo.sourceColumn }}
+              </code>
+            </div>
+            <div v-if="aiDrawerErrorInfo.stack">
+              <span>Stack</span>
+              <pre>{{ aiDrawerErrorInfo.stack }}</pre>
+            </div>
           </div>
-          <div class="ai-drawer__details" v-if="aiDrawerErrorInfo">
-            <div class="ai-drawer__detail">
-              <span class="label">URL</span>
-              <span class="value">{{ aiDrawerErrorInfo.url }}</span>
-            </div>
-            <div class="ai-drawer__detail" v-if="aiDrawerErrorInfo.userAgent">
-              <span class="label">User Agent</span>
-              <span class="value">{{ aiDrawerErrorInfo.userAgent }}</span>
-            </div>
-            <div class="ai-drawer__detail" v-if="aiDrawerErrorInfo.stack">
-              <span class="label">Stack</span>
-              <pre class="value value--code">{{ aiDrawerErrorInfo.stack }}</pre>
-            </div>
-          </div>
+
           <section class="ai-drawer__stream">
             <div v-if="aiDrawerLoading && !aiDrawerContent" class="ai-drawer__loading">
-              <span class="ai-drawer__spinner"></span>
-              <span>模型正在分析当前错误...</span>
+              <span class="spinner"></span>
+              <span>正在分析当前异常...</span>
             </div>
-            <pre v-else-if="aiDrawerError" class="ai-drawer__output ai-drawer__output--error">
-              {{ aiDrawerError }}
-            </pre>
-            <pre v-else class="ai-drawer__output">
-              {{ aiDrawerContent }}
-            </pre>
+            <pre v-else-if="aiDrawerError" class="ai-drawer__output ai-drawer__output--error">{{ aiDrawerError }}</pre>
+            <pre v-else class="ai-drawer__output">{{ aiDrawerContent }}</pre>
           </section>
-        </div>
+        </aside>
       </div>
     </Transition>
-
-    <!-- Footer -->
-    <footer class="nx-footer">
-      <div class="nx-footer__left">
-        <span class="nx-footer__text">神经枢纽监控 v2.0.0</span>
-      </div>
-      <div class="nx-footer__center">
-        <div class="nx-data-stream">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
-      </div>
-      <div class="nx-footer__right">
-        <span class="nx-footer__text">安全连接已建立</span>
-      </div>
-    </footer>
   </div>
 </template>
 
 <style scoped>
-.nx-app {
+.monitor-shell {
   min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  background: var(--nx-void);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  position: relative;
-  overflow: hidden;
+  gap: 20px;
+  padding: 20px 16px;
+  background: var(--nx-surface);
+  border-right: 1px solid var(--nx-border);
 }
 
-/* Ambient Glow Effects */
-.nx-ambient-glow {
-  position: fixed;
-  width: 600px;
-  height: 600px;
-  border-radius: 50%;
-  filter: blur(150px);
-  opacity: 0.15;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.nx-ambient-glow--cyan {
-  background: var(--nx-cyan);
-  top: -200px;
-  left: -200px;
-  animation: pulse-glow 8s ease-in-out infinite;
-}
-
-.nx-ambient-glow--magenta {
-  background: var(--nx-magenta);
-  bottom: -200px;
-  right: -200px;
-  animation: pulse-glow 8s ease-in-out infinite 4s;
-}
-
-/* Header */
-.nx-header {
+.brand {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-xl);
-  background: linear-gradient(180deg, var(--nx-surface) 0%, transparent 100%);
-  border-bottom: 1px solid var(--nx-border);
-  position: relative;
-  z-index: 100;
+  gap: 12px;
+  padding: 4px 4px 12px;
 }
 
-.nx-header::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--nx-cyan), transparent);
-  opacity: 0.5;
-}
-
-/* Logo */
-.nx-logo {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.nx-logo__icon {
+.brand__mark {
   width: 40px;
   height: 40px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: var(--radius-lg);
   color: var(--nx-cyan);
-  animation: flicker 4s infinite;
+  background: var(--nx-cyan-glow);
+  display: grid;
+  place-items: center;
 }
 
-.nx-logo__icon svg {
-  width: 100%;
-  height: 100%;
+.brand__mark svg {
+  width: 24px;
+  height: 24px;
 }
 
-.nx-logo__text {
+.brand__title {
+  color: var(--nx-text-primary);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.brand__subtitle {
+  color: var(--nx-text-muted);
+  font-size: 0.78rem;
+}
+
+.sidebar-nav {
   display: flex;
   flex-direction: column;
+  gap: 6px;
 }
 
-.nx-logo__title {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  color: var(--nx-cyan);
-  text-shadow: 0 0 20px var(--nx-cyan-glow);
-}
-
-.nx-logo__subtitle {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.3em;
-  color: var(--nx-text-muted);
-  margin-top: -2px;
-}
-
-/* Navigation */
-.nx-nav {
-  display: flex;
-  gap: var(--space-sm);
-}
-
-.nx-nav__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-lg);
+.sidebar-nav__item {
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
   background: transparent;
-  border: 1px solid var(--nx-border);
   color: var(--nx-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  letter-spacing: 0.1em;
+  text-align: left;
   cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: all var(--transition-normal);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
-.nx-nav__item::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, var(--nx-cyan-glow) 0%, transparent 50%);
-  opacity: 0;
-  transition: opacity var(--transition-normal);
-}
-
-.nx-nav__item:hover {
-  border-color: var(--nx-cyan-dim);
+.sidebar-nav__item:hover,
+.sidebar-nav__item--active {
+  background: var(--nx-deep);
+  border-color: var(--nx-border);
   color: var(--nx-text-primary);
 }
 
-.nx-nav__item:hover::before {
-  opacity: 1;
+.sidebar-nav__item--active {
+  box-shadow: inset 3px 0 0 var(--nx-cyan);
 }
 
-.nx-nav__item--active {
-  border-color: var(--nx-cyan);
-  color: var(--nx-cyan);
-  background: var(--nx-cyan-glow);
+.sidebar-nav__label {
+  display: block;
+  font-weight: 800;
 }
 
-.nx-nav__item--active::before {
-  opacity: 1;
-}
-
-.nx-nav__icon {
-  font-size: 1rem;
-}
-
-.nx-nav__indicator {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 2px;
-  background: var(--nx-cyan);
-  transition: width var(--transition-normal);
-  box-shadow: 0 0 10px var(--nx-cyan);
-}
-
-.nx-nav__item--active .nx-nav__indicator {
-  width: 80%;
-}
-
-/* Status Panel */
-.nx-status-panel {
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--nx-elevated);
-  border: 1px solid var(--nx-border);
-}
-
-.nx-status-panel__item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.nx-status-panel__label {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.15em;
+.sidebar-nav__desc {
+  display: block;
+  margin-top: 2px;
   color: var(--nx-text-muted);
+  font-size: 0.76rem;
 }
 
-.nx-status-panel__value {
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-}
-
-.nx-status-panel__value--online {
-  color: var(--nx-green);
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.nx-status-panel__value--time {
-  color: var(--nx-cyan);
-  font-variant-numeric: tabular-nums;
-}
-
-.nx-status-panel__divider {
-  width: 1px;
-  height: 30px;
-  background: var(--nx-border);
-}
-
-.nx-pulse {
-  width: 8px;
-  height: 8px;
-  background: var(--nx-green);
-  border-radius: 50%;
-  animation: pulse-glow 2s ease-in-out infinite;
-  box-shadow: 0 0 10px var(--nx-green);
-}
-
-/* Main Content */
-.nx-main {
-  flex: 1;
-  padding: var(--space-xl);
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
+.project-switcher {
   min-height: 0;
-  overflow: hidden;
-}
-
-.nx-content {
-  max-width: 1600px;
-  margin: 0 auto;
-  width: 100%;
-  flex: 1;
   display: flex;
+  flex: 1;
   flex-direction: column;
-  min-height: 0;
+  gap: 10px;
 }
 
-/* Footer */
-.nx-footer {
+.section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md) var(--space-xl);
-  background: linear-gradient(0deg, var(--nx-surface) 0%, transparent 100%);
-  border-top: 1px solid var(--nx-border);
-  position: relative;
-  z-index: 100;
+  color: var(--nx-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
-.nx-footer::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--nx-magenta), transparent);
-  opacity: 0.3;
+.icon-button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-md);
+  background: var(--nx-surface);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
 }
 
-.nx-footer__text {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.15em;
-  color: var(--nx-text-muted);
+.icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
-.nx-data-stream {
+.project-search input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-md);
+  background: var(--nx-deep);
+  color: var(--nx-text-primary);
+}
+
+.project-list {
+  min-height: 0;
+  overflow: auto;
   display: flex;
-  gap: 3px;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
 }
 
-.nx-data-stream span {
-  width: 3px;
-  height: 12px;
-  background: var(--nx-cyan);
-  opacity: 0.3;
-  animation: data-stream-bar 1s ease-in-out infinite;
+.project-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--nx-text-secondary);
+  text-align: left;
+  cursor: pointer;
 }
 
-.nx-data-stream span:nth-child(1) {
-  animation-delay: 0s;
-}
-.nx-data-stream span:nth-child(2) {
-  animation-delay: 0.1s;
-}
-.nx-data-stream span:nth-child(3) {
-  animation-delay: 0.2s;
-}
-.nx-data-stream span:nth-child(4) {
-  animation-delay: 0.3s;
-}
-.nx-data-stream span:nth-child(5) {
-  animation-delay: 0.4s;
+.project-item:hover,
+.project-item--active {
+  border-color: var(--nx-border);
+  background: var(--nx-deep);
 }
 
-@keyframes data-stream-bar {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scaleY(0.5);
-  }
-  50% {
-    opacity: 1;
-    transform: scaleY(1);
-  }
+.project-item--active {
+  color: var(--nx-cyan);
 }
 
-/* Transitions */
-.nx-fade-enter-active,
-.nx-fade-leave-active {
-  transition: all 0.3s ease;
+.project-item__name {
+  color: inherit;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.nx-fade-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
+.project-item__meta,
+.project-empty {
+  color: var(--nx-text-muted);
+  font-size: 0.76rem;
 }
 
-.nx-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-20px);
+.sidebar-status {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-lg);
+  background: var(--nx-deep);
+  color: var(--nx-text-secondary);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
-/* AI Drawer */
+.sidebar-status__time {
+  color: var(--nx-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--nx-green);
+  box-shadow: 0 0 0 3px var(--nx-green-glow);
+}
+
+.workspace {
+  min-width: 0;
+  padding: 24px clamp(20px, 3vw, 36px);
+}
+
+.workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+
+.workspace-header__eyebrow,
+.workspace-header__meta {
+  color: var(--nx-text-muted);
+  font-size: 0.82rem;
+}
+
+.workspace-header h1 {
+  margin: 2px 0;
+  color: var(--nx-text-primary);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  word-break: break-word;
+}
+
+.workspace-header__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ghost-button,
+.text-button {
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--nx-surface);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  font-weight: 800;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.ghost-button {
+  height: 38px;
+  padding: 0 14px;
+}
+
+.ghost-button:hover,
+.text-button:hover {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: var(--nx-cyan-glow);
+  color: var(--nx-cyan);
+}
+
+.text-button {
+  height: 32px;
+  padding: 0 10px;
+  border-color: transparent;
+}
+
+.notice {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface);
+}
+
+.notice--error {
+  color: var(--nx-red);
+  background: var(--nx-red-glow);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stat-card,
+.overview-panel {
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-lg);
+  background: var(--nx-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.stat-card {
+  min-height: 150px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.stat-card__label {
+  color: var(--nx-text-secondary);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.stat-card strong {
+  color: var(--nx-text-primary);
+  font-size: 2.1rem;
+  line-height: 1;
+}
+
+.stat-card small {
+  margin-left: 4px;
+  color: var(--nx-text-muted);
+  font-size: 0.95rem;
+}
+
+.stat-card span:last-child {
+  color: var(--nx-text-muted);
+  font-size: 0.82rem;
+}
+
+.overview-panel {
+  padding: 18px;
+}
+
+.overview-panel--wide {
+  grid-column: span 3;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel-title h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compact-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-md);
+  background: var(--nx-surface);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.compact-row:hover {
+  border-color: var(--nx-border-strong);
+  background: var(--nx-deep);
+}
+
+.compact-row__type {
+  color: var(--nx-cyan);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.compact-row__message {
+  color: var(--nx-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-row__time {
+  color: var(--nx-text-muted);
+  font-size: 0.78rem;
+}
+
+.metric-snapshot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-snapshot div {
+  padding: 12px;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-md);
+  background: var(--nx-deep);
+}
+
+.metric-snapshot dt {
+  color: var(--nx-text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.metric-snapshot dd {
+  margin-top: 4px;
+  color: var(--nx-text-primary);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.empty-inline {
+  padding: 32px 16px;
+  border: 1px dashed var(--nx-border);
+  border-radius: var(--radius-lg);
+  color: var(--nx-text-muted);
+  text-align: center;
+}
+
+.file-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.file-view__errors {
+  margin-top: 0;
+}
+
 .ai-drawer {
   position: fixed;
   inset: 0;
+  z-index: 1000;
   display: flex;
   justify-content: flex-end;
-  pointer-events: none;
-  z-index: 200;
 }
 
 .ai-drawer__mask {
   flex: 1;
-  background: rgba(1, 3, 12, 0.6);
-  backdrop-filter: blur(6px);
-  pointer-events: auto;
+  border: 0;
+  background: rgba(15, 23, 42, 0.36);
+  cursor: pointer;
 }
 
 .ai-drawer__panel {
-  width: min(520px, 100%);
-  background: var(--nx-surface);
-  border-left: 1px solid var(--nx-border);
-  box-shadow: -20px 0 40px rgba(0, 0, 0, 0.35);
-  padding: var(--space-xl);
-  pointer-events: auto;
+  width: min(620px, 100%);
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  gap: 18px;
+  padding: 24px;
+  overflow: auto;
+  border-left: 1px solid var(--nx-border);
+  background: var(--nx-surface);
+  box-shadow: -24px 0 48px rgba(15, 23, 42, 0.16);
 }
 
 .ai-drawer__header {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-lg);
+  gap: 20px;
 }
 
 .ai-drawer__eyebrow {
-  font-family: var(--font-mono);
-  letter-spacing: 0.3em;
-  font-size: 0.65rem;
   color: var(--nx-text-muted);
-  margin-bottom: var(--space-xs);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
-.ai-drawer__title {
-  font-family: var(--font-display);
-  font-size: 1.15rem;
-  color: var(--nx-text-primary);
-  margin: 0 0 var(--space-xs);
+.ai-drawer__header h2 {
+  margin: 4px 0;
+  font-size: 1.1rem;
+  word-break: break-word;
 }
 
 .ai-drawer__meta-line {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  color: var(--nx-text-secondary);
   display: flex;
-  gap: var(--space-xs);
   flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-drawer__meta-line span {
+  padding: 3px 8px;
+  border: 1px solid var(--nx-border);
+  border-radius: 999px;
+  background: var(--nx-deep);
+  color: var(--nx-text-secondary);
+  font-size: 0.76rem;
 }
 
 .ai-drawer__close {
-  border: 1px solid var(--nx-border);
-  background: transparent;
+  width: 54px;
+  height: 34px;
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--nx-surface);
   color: var(--nx-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  display: flex;
-  gap: var(--space-sm);
-  align-items: center;
-  padding: 8px 16px;
   cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.ai-drawer__close span {
-  padding: 2px 4px;
-  border: 1px solid var(--nx-border);
-  font-size: 0.6rem;
-}
-
-.ai-drawer__close:hover {
-  border-color: var(--nx-cyan);
-  color: var(--nx-cyan);
+  font-weight: 800;
 }
 
 .ai-drawer__details {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  background: var(--nx-deep);
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--nx-border);
+  border-radius: var(--radius-lg);
+  background: var(--nx-deep);
 }
 
-.ai-drawer__detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.ai-drawer__detail .label {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.2em;
+.ai-drawer__details span {
+  display: block;
+  margin-bottom: 4px;
   color: var(--nx-text-muted);
-  text-transform: uppercase;
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
-.ai-drawer__detail .value {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
+.ai-drawer__details code,
+.ai-drawer__details pre {
   color: var(--nx-text-primary);
-  word-break: break-all;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.ai-drawer__detail .value--code {
-  background: rgba(0, 0, 0, 0.4);
-  padding: var(--space-sm);
-  max-height: 120px;
-  overflow-y: auto;
+.ai-drawer__details pre {
+  max-height: 160px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--radius-md);
+  background: var(--nx-code-bg);
 }
 
 .ai-drawer__stream {
-  min-height: 200px;
+  min-height: 220px;
+  padding: 16px;
   border: 1px solid var(--nx-border);
-  background: var(--nx-deep);
-  padding: var(--space-lg);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  line-height: 1.6;
-  color: var(--nx-text-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--nx-code-bg);
 }
 
 .ai-drawer__loading {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 10px;
   color: var(--nx-text-secondary);
 }
 
-.ai-drawer__spinner {
+.spinner {
   width: 16px;
   height: 16px;
   border: 2px solid var(--nx-cyan);
   border-top-color: transparent;
-  border-radius: 50%;
+  border-radius: 999px;
   animation: spin 1s linear infinite;
 }
 
 .ai-drawer__output {
-  white-space: pre-wrap;
-  overflow-y: auto;
-  max-height: 360px;
   color: var(--nx-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .ai-drawer__output--error {
   color: var(--nx-red);
 }
 
+.fade-enter-active,
+.fade-leave-active,
 .ai-drawer-enter-active,
 .ai-drawer-leave-active {
-  transition: opacity 0.25s ease;
+  transition:
+    opacity var(--transition-normal),
+    transform var(--transition-normal);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 
 .ai-drawer-enter-from,
@@ -894,10 +1311,64 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-@media (max-width: 768px) {
-  .ai-drawer__panel {
-    width: 100%;
-    padding: var(--space-lg);
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 1100px) {
+  .monitor-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .sidebar-nav,
+  .project-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-panel--wide {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .workspace {
+    padding: 18px 14px;
+  }
+
+  .workspace-header {
+    flex-direction: column;
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-panel--wide {
+    grid-column: auto;
+  }
+
+  .compact-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 10px 12px;
   }
 }
 </style>

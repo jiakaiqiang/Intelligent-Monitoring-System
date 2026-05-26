@@ -137,6 +137,38 @@ export class SourceMapController {
    * 根据项目 + 文件名（可选版本）查询单个 SourceMap。
    * 主要用于调试定位具体 SourceMap 是否存在。
    */
+  @Get(':projectId/source/content')
+  async getSourceContent(
+    @Param('projectId') projectId: string,
+    @Query('file') file: string,
+    @Query('line') line?: string,
+    @Query('column') column?: string,
+    @Query('version') version?: string,
+    @Query('context') context?: string
+  ) {
+    if (!projectId || !file) {
+      throw new BadRequestException('Project ID and source file are required');
+    }
+
+    const source = await this.sourceMapService.getSourceSnippet({
+      projectId,
+      file,
+      version,
+      line: line ? Number(line) : undefined,
+      column: column ? Number(column) : undefined,
+      context: context ? Number(context) : undefined,
+    });
+
+    if (!source) {
+      throw new NotFoundException(`Source content not found for ${file}`);
+    }
+
+    return {
+      success: true,
+      data: source,
+    };
+  }
+
   @Get(':projectId/:filename')
   async getByFile(
     @Param('projectId') projectId: string,

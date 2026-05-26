@@ -188,7 +188,7 @@ MYSQL_PASSWORD=root
 MYSQL_DB=monitor
 REDIS_HOST=localhost
 REDIS_PORT=6379
-ANTHROPIC_API_KEY=your_api_key_here
+AI_API_KEY=your_api_key_here
 ```
 
 ## 安装依赖
