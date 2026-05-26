@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { ErrorInfo } from '@monitor/shared/types';
 
 const API_BASE_URL = import.meta.env.VITE_MONITOR_API ?? 'http://localhost:3000';
@@ -78,6 +78,7 @@ const expandedPaths = ref<Set<string>>(new Set());
 const sourceLoading = ref(false);
 const sourceError = ref('');
 const sourceSnippet = ref<SourceSnippet | null>(null);
+const sourcePanelRef = ref<HTMLElement | null>(null);
 let sourceRequestId = 0;
 
 const normalizePath = (value: string) => {
@@ -252,6 +253,14 @@ const sourceLocation = computed(() => {
   return `${frame.file}${line}${column}`;
 });
 
+const concreteSourceLocation = computed(() => {
+  if (sourceSnippet.value) {
+    return `${sourceSnippet.value.sourceFile}:${sourceSnippet.value.line ?? '-'}:${sourceSnippet.value.column ?? '-'}`;
+  }
+
+  return sourceLocation.value;
+});
+
 const sourceQueryKey = computed(() => {
   const frame = selectedFrame.value;
   if (!frame) return '';
@@ -358,6 +367,9 @@ const fetchSourceSnippet = async () => {
 
     if (!sourceSnippet.value) {
       sourceError.value = 'SourceMap 已返回，但没有可展示的源码内容。';
+    } else {
+      await nextTick();
+      sourcePanelRef.value?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
   } catch (error) {
     if (requestId !== sourceRequestId) return;
@@ -417,6 +429,10 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
       <div class="summary-card">
         <span>当前文件</span>
         <strong>{{ selectedFrame?.file || '未定位' }}</strong>
+      </div>
+      <div class="summary-card summary-card--location">
+        <span>源码错误定位</span>
+        <strong>{{ concreteSourceLocation }}</strong>
       </div>
     </div>
 
@@ -526,7 +542,7 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
       </aside>
     </div>
 
-    <section class="source-code-panel">
+    <section ref="sourcePanelRef" class="source-code-panel">
       <div class="section-title">
         <div>
           <p>Source Code</p>
@@ -541,6 +557,10 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
       </div>
 
       <div v-else-if="sourceSnippet" class="source-viewer">
+        <div class="source-hit">
+          <span>错误命中行</span>
+          <code>{{ concreteSourceLocation }}</code>
+        </div>
         <div class="source-viewer__meta">
           <code>{{ sourceSnippet.sourceFile }}</code>
           <span>
@@ -552,7 +572,7 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
           :key="line.line"
           class="source-line"
           :class="{ 'source-line--highlighted': line.highlighted }"
-        ><span class="source-line__number">{{ line.line }}</span><span class="source-line__content">{{ line.content || ' ' }}</span></span></code></pre>
+        ><span class="source-line__number">{{ line.line }}</span><span class="source-line__marker">{{ line.highlighted ? '>' : ' ' }}</span><span class="source-line__content">{{ line.content || ' ' }}</span></span></code></pre>
       </div>
 
       <div v-else class="source-state source-state--empty">
@@ -694,7 +714,7 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
 
 .summary-grid {
   display: grid;
-  grid-template-columns: 180px 180px minmax(0, 1fr);
+  grid-template-columns: 160px 160px minmax(0, 0.75fr) minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -718,6 +738,11 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
   font-size: 0.95rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.summary-card--location strong {
+  color: var(--nx-cyan);
+  font-family: var(--font-mono);
 }
 
 .detail-layout {
@@ -1020,6 +1045,31 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
   background: #fbfdff;
 }
 
+.source-hit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--nx-border);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.source-hit span {
+  color: var(--nx-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.source-hit code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--nx-cyan);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .source-viewer__meta {
   display: flex;
   align-items: center;
@@ -1054,7 +1104,7 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
 
 .source-line {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 64px 22px minmax(0, 1fr);
   min-width: max-content;
   padding-right: 18px;
 }
@@ -1068,6 +1118,13 @@ watch(sourceQueryKey, fetchSourceSnippet, { immediate: true });
   padding-right: 12px;
   color: var(--nx-text-muted);
   text-align: right;
+  user-select: none;
+}
+
+.source-line__marker {
+  color: var(--nx-cyan);
+  font-weight: 900;
+  text-align: center;
   user-select: none;
 }
 

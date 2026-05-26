@@ -88,18 +88,17 @@ export class ErrorMappingService {
     const mappedLines: string[] = [];
 
     for (const line of lines) {
-      const match = line.match(/at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)/);
-      if (match) {
-        const [, func, file, lineNum, colNum] = match;
+      const frame = this.parseStackFrame(line);
+      if (frame) {
         const mapped = await this.mapPositionWithSourceMaps(
-          file,
-          parseInt(lineNum),
-          parseInt(colNum),
+          frame.file,
+          frame.line,
+          frame.column,
           error.version,
           sourceMaps
         );
         if (mapped) {
-          mappedLines.push(`at ${func} (${mapped.source}:${mapped.line}:${mapped.column})`);
+          mappedLines.push(`    at ${frame.functionName} (${mapped.source}:${mapped.line}:${mapped.column})`);
         } else {
           mappedLines.push(line);
         }
@@ -110,7 +109,80 @@ export class ErrorMappingService {
 
     return {
       ...error,
-      stack: mappedLines.join('\n'),
+      mappedStack: mappedLines.join('\n'),
+    } as MappedErrorInfo;
+  }
+
+  private parseStackFrame(line: string): null | {
+    functionName: string;
+    file: string;
+    line: number;
+    column: number;
+  } {
+    const chromeMatch = line.match(/^\s*at\s+(?:(.*?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/);
+    if (chromeMatch) {
+      return {
+        functionName: chromeMatch[1] || '(anonymous)',
+        file: chromeMatch[2],
+        line: Number(chromeMatch[3]),
+        column: Number(chromeMatch[4]),
+      };
+    }
+
+    const firefoxMatch = line.match(/^\s*(.*?)@(.+?):(\d+):(\d+)\s*$/);
+    if (firefoxMatch) {
+      return {
+        functionName: firefoxMatch[1] || '(anonymous)',
+        file: firefoxMatch[2],
+        line: Number(firefoxMatch[3]),
+        column: Number(firefoxMatch[4]),
+      };
+    }
+
+    const fileOnlyMatch = line.match(/(.+\.(?:js|ts|tsx|jsx|vue|mjs|cjs)):(\d+):(\d+)/);
+    if (fileOnlyMatch) {
+      return {
+        functionName: '(anonymous)',
+        file: fileOnlyMatch[1],
+        line: Number(fileOnlyMatch[2]),
+        column: Number(fileOnlyMatch[3]),
+      };
+    }
+
+    return null;
+  }
+
+  private isApplicationSource(file: string): boolean {
+    return !/(^|\/)(node_modules|webpack\/bootstrap|webpack-runtime)(\/|$)/.test(file);
+  }
+
+  private getStackForMapping(error: ErrorInfo): string {
+    return (error as MappedErrorInfo).mappedStack || error.stack || '';
+  }
+
+  private getPrimaryMappedFrame(stack: string) {
+    const frames = stack
+      .split('\n')
+      .map((line) => this.parseStackFrame(line))
+      .filter((frame): frame is NonNullable<typeof frame> => Boolean(frame));
+
+    return frames.find((frame) => this.isApplicationSource(frame.file)) || frames[0] || null;
+  }
+
+  private mergeMappedInfo(stack: string): Partial<MappedErrorInfo> {
+    const frame = this.getPrimaryMappedFrame(stack);
+
+    if (!frame) {
+      return {
+        mappedStack: stack,
+      };
+    }
+
+    return {
+      sourceFile: frame.file,
+      sourceLine: frame.line,
+      sourceColumn: frame.column,
+      mappedStack: stack,
     };
   }
 
@@ -243,8 +315,7 @@ export class ErrorMappingService {
    * 从错误堆栈中提取文件名
    */
   private extractFileFromStack(stack: string): string {
-    const match = stack.match(/at\s+\((.+?):(\d+):(\d+)\)/);
-    return match ? match[1] : '';
+    return this.parseStackFrame(stack)?.file || '';
   }
 
   /**
@@ -262,25 +333,10 @@ export class ErrorMappingService {
    * 从映射后的错误堆栈中提取信息
    */
   private extractMappedInfo(error: ErrorInfo): Partial<MappedErrorInfo> {
-    if (!error.stack) return {};
+    const stack = this.getStackForMapping(error);
+    if (!stack) return {};
 
-    const lines = error.stack.split('\n');
-    const lastLine = lines[lines.length - 1];
-
-    const match = lastLine.match(/at\s+.*?\((.+?):(\d+):(\d+)\)/);
-    if (match) {
-      const [, sourceFile, sourceLine, sourceColumn] = match;
-      return {
-        sourceFile,
-        sourceLine: parseInt(sourceLine),
-        sourceColumn: parseInt(sourceColumn),
-        mappedStack: error.stack,
-      };
-    }
-
-    return {
-      mappedStack: error.stack,
-    };
+    return this.mergeMappedInfo(stack);
   }
 
   /**
